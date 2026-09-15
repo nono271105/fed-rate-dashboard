@@ -1,4 +1,4 @@
-# Sources vérifiées — Fed/BCE
+# Sources vérifiées - Fed/BCE
 
 - ECB key rates: https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html
   - Page officielle : deposit facility 2.50 %, MRO 2.65 %, marginal lending 2.90 % avec effet au 16 Sep. 2026.
@@ -17,6 +17,7 @@
 Décision produit : le panneau BCE distingue les taux officiels ECB (€STR et taux directeurs) du pricing de marché public OIS, avec une note de transparence. Le code prévoit un repli en cache si la source de marché n’est pas accessible.
 
 Références Apple utilisées pour la refonte :
+
 - accessibility.md : perceptible, adaptable, ne pas dépendre de la couleur seule, contrastes AA, cibles et clavier.
 - layout.md : grouper les éléments liés, espace suffisant pour l’essentiel, ordre de lecture et adaptation aux tailles.
 - typography.md : lisibilité, poids réguliers, hiérarchie, limiter les familles, adaptation aux grandes tailles.

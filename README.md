@@ -1,5 +1,5 @@
 <h1 align="center">
-  Rate Signals — Fed & BCE
+  Rate Signals - Fed & BCE
 </h1>
 
 <p align="center">
@@ -23,23 +23,23 @@
 
 ## Fonctionnalités
 
-### Fed — Réserve fédérale
+### Fed - Réserve fédérale
 
-| Donnée | Source |
-|:---|:---|
-| **Probabilités FOMC** réunion par réunion | CME 30-Day Fed Funds settlements (ZQ) |
-| **Taux effectif EFFR** et fourchette cible | FRED (DFEDTARL / DFEDTARU) |
-| **Mouvements implicites** d'ici fin d'année (× 25 bp) | Calculé |
-| **Historique 30 jours** des probabilités par scénario | Base de données locale |
+| Donnée                                                | Source                                |
+| :---------------------------------------------------- | :------------------------------------ |
+| **Probabilités FOMC** réunion par réunion             | CME 30-Day Fed Funds settlements (ZQ) |
+| **Taux effectif EFFR** et fourchette cible            | FRED (DFEDTARL / DFEDTARU)            |
+| **Mouvements implicites** d'ici fin d'année (× 25 bp) | Calculé                               |
+| **Historique 30 jours** des probabilités par scénario | Base de données locale                |
 
-### BCE — Banque centrale européenne
+### BCE - Banque centrale européenne
 
-| Donnée | Source |
-|:---|:---|
-| **Taux directeurs officiels** (dépôt, MRO, marginal) | Site ECB officiel |
-| **€STR** Euro Short-Term Rate | Site ECB officiel |
-| **Pricing par réunion** Governing Council | Agrégateur public OIS |
-| **Calendrier des réunions** en temps réel | Calendrier ECB officiel |
+| Donnée                                               | Source                  |
+| :--------------------------------------------------- | :---------------------- |
+| **Taux directeurs officiels** (dépôt, MRO, marginal) | Site ECB officiel       |
+| **€STR** Euro Short-Term Rate                        | Site ECB officiel       |
+| **Pricing par réunion** Governing Council            | Agrégateur public OIS   |
+| **Calendrier des réunions** en temps réel            | Calendrier ECB officiel |
 
 ### Interface
 
@@ -53,7 +53,7 @@
 
 ## Méthodologie mathématique
 
-### Fed — méthode CME FedWatch
+### Fed - méthode CME FedWatch
 
 La méthode reproduit fidèlement la méthodologie officielle publiée par le CME Group.
 
@@ -89,7 +89,7 @@ $$\text{moves}_{\text{year-end}} = \frac{r_{\text{post, déc}} - \text{EFFR}}{0.
 
 ---
 
-### BCE — OIS implicites
+### BCE - OIS implicites
 
 #### 1. Mouvement implicite par réunion
 
@@ -177,35 +177,35 @@ VITE_ANALYTICS_WEBSITE_ID=...
 
 ### Scripts disponibles
 
-| Commande | Description |
-|---|---|
-| `pnpm dev` | Serveur de développement |
-| `pnpm build` | Build de production |
-| `pnpm start` | Démarrer en production |
-| `pnpm test` | Lancer les tests |
+| Commande       | Description                         |
+| -------------- | ----------------------------------- |
+| `pnpm dev`     | Serveur de développement            |
+| `pnpm build`   | Build de production                 |
+| `pnpm start`   | Démarrer en production              |
+| `pnpm test`    | Lancer les tests                    |
 | `pnpm db:push` | Générer et appliquer les migrations |
-| `pnpm check` | Vérification TypeScript |
+| `pnpm check`   | Vérification TypeScript             |
 
 ---
 
 ## Sources de données
 
-| Source | Usage |
-|:---|:---|
-| [CME Group – settlements ZQ](https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html) | Contrats 30-Day Fed Funds |
-| [FRED – St. Louis Fed](https://fred.stlouisfed.org/) | EFFR, fourchette cible Fed |
-| [ECB – taux directeurs](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/) | Taux dépôt, MRO, marginal |
-| [ECB – €STR](https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_short-term_rate/) | Euro Short-Term Rate |
-| Agrégateur public OIS | Pricing BCE par réunion |
+| Source                                                                                                     | Usage                      |
+| :--------------------------------------------------------------------------------------------------------- | :------------------------- |
+| [CME Group – settlements ZQ](https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html)       | Contrats 30-Day Fed Funds  |
+| [FRED – St. Louis Fed](https://fred.stlouisfed.org/)                                                       | EFFR, fourchette cible Fed |
+| [ECB – taux directeurs](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/) | Taux dépôt, MRO, marginal  |
+| [ECB – €STR](https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_short-term_rate/)   | Euro Short-Term Rate       |
+| Agrégateur public OIS                                                                                      | Pricing BCE par réunion    |
 
-> ⚠️ **Avertissement** — Les données affichées sont à titre informatif uniquement. Elles ne constituent pas un conseil en investissement.
+> ⚠️ **Avertissement** - Les données affichées sont à titre informatif uniquement. Elles ne constituent pas un conseil en investissement.
 
 ---
 
 ## Licence
 
-MIT — voir [`LICENSE`](LICENSE).
+MIT - voir [`LICENSE`](LICENSE).
 
 ---
 
-*Dernière mise à jour : septembre 2026*
+_Dernière mise à jour : septembre 2026_
