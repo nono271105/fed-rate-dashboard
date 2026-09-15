@@ -1,31 +1,109 @@
-# Rate Signals — Fed & BCE
+<h1 align="center">
+  Rate Signals — Fed & BCE
+</h1>
 
-> Probabilités implicites de marché pour les décisions de la Fed et de la BCE, en temps réel.
+<p align="center">
+  <a href="https://github.com/nono271105/fed-rate-dashboard"><img src="https://img.shields.io/badge/status-Active-brightgreen.svg" alt="Active"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT"></a>
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React 19">
+  <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/tRPC-11-2596BE?logo=trpc&logoColor=white" alt="tRPC">
+  <br>
+  <img src="https://img.shields.io/badge/Vite-7-646CFF?logo=vite&logoColor=white" alt="Vite">
+  <img src="https://img.shields.io/badge/Drizzle-ORM-C5F74F?logo=drizzle&logoColor=black" alt="Drizzle">
+  <img src="https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white" alt="MySQL">
+</p>
 
-**Rate Signals** est un dashboard full-stack qui calcule et affiche les probabilités implicites des décisions de taux directeurs de la **Réserve fédérale américaine (Fed)** et de la **Banque centrale européenne (BCE)**, à partir de données de marché publiques.
+<p align="center">
+  Probabilités implicites des décisions de taux de la <strong>Fed</strong> et de la <strong>BCE</strong>, calculées en temps réel à partir de données de marché publiques.<br>
+  Méthode CME FedWatch pour la Fed · OIS implicites pour la BCE.
+</p>
 
 ---
 
 ## Fonctionnalités
 
-### Fed – Réserve fédérale
-- Probabilités **réunion par réunion** calculées à partir des settlements des contrats **30-Day Fed Funds (ZQ)** du CME
-- Taux effectif **EFFR** et fourchette cible (DFEDTARL / DFEDTARU) via **FRED** (St. Louis Fed)
-- **Nombre de mouvements implicites** d'ici fin d'année (équivalent × 25 bp)
-- Historique glissant des probabilités sur 30 jours
+### Fed — Réserve fédérale
 
-### BCE – Banque centrale européenne
-- Taux directeurs officiels (**dépôt, MRO, marginal**) scrappés depuis le site ECB
-- Taux **€STR** (Euro Short-Term Rate) du jour
-- Pricing par réunion à partir d'un agrégateur public d'OIS européens
-- Calendrier des réunions Governing Council en temps réel
+| Donnée | Source |
+|:---|:---|
+| **Probabilités FOMC** réunion par réunion | CME 30-Day Fed Funds settlements (ZQ) |
+| **Taux effectif EFFR** et fourchette cible | FRED (DFEDTARL / DFEDTARU) |
+| **Mouvements implicites** d'ici fin d'année (× 25 bp) | Calculé |
+| **Historique 30 jours** des probabilités par scénario | Base de données locale |
+
+### BCE — Banque centrale européenne
+
+| Donnée | Source |
+|:---|:---|
+| **Taux directeurs officiels** (dépôt, MRO, marginal) | Site ECB officiel |
+| **€STR** Euro Short-Term Rate | Site ECB officiel |
+| **Pricing par réunion** Governing Council | Agrégateur public OIS |
+| **Calendrier des réunions** en temps réel | Calendrier ECB officiel |
 
 ### Interface
-- Basculement **Fed / BCE** avec onglets
-- Cards métriques, cards de réunion avec scénarios (hausse / maintien / baisse)
-- Graphique d'historique des probabilités par cible de taux (30 j)
+
+- Basculement **Fed / BCE** avec onglets dédiés
+- Cards métriques, cards de réunion avec scénarios détaillés (hausse / maintien / baisse)
+- Graphique **historique des probabilités** par cible de taux sur 30 jours
 - Actualisation manuelle à la demande
-- Design responsive, mode clair, typographie DM Sans
+- Design responsive, typographie **DM Sans**
+
+---
+
+## Méthodologie mathématique
+
+### Fed — méthode CME FedWatch
+
+La méthode reproduit fidèlement la méthodologie officielle publiée par le CME Group.
+
+#### 1. Taux implicite mensuel
+
+Pour chaque contrat 30-Day Fed Funds du mois M (prix coté 100 − r) :
+
+$$r_M = 100 - \text{settle}_M$$
+
+#### 2. Décomposition avant / après réunion
+
+Soit `D` le jour de la réunion FOMC dans le mois et `N` le nombre total de jours du mois :
+
+$$r_{\text{pre}} = r_{M-1}$$
+
+$$r_{\text{post}} = \frac{r_M \cdot N - r_{\text{pre}} \cdot (D - 1)}{N - D + 1}$$
+
+> **Cas limite :** si la réunion tombe dans les 3 derniers jours du mois, `r_post` est lu directement sur le contrat du mois suivant M+1 pour éviter le bruit statistique dû à un faible nombre de jours post-réunion.
+
+#### 3. Probabilités des scénarios
+
+Le nombre implicite de mouvements de 25 bp :
+
+$$n = \frac{r_{\text{post}} - r_{\text{pre}}}{0.25}$$
+
+Les deux scénarios adjacents et leurs probabilités :
+
+$$P(\text{scénario haut}) = n - \lfloor n \rfloor \qquad P(\text{scénario bas}) = 1 - P(\text{scénario haut})$$
+
+#### 4. Horizon fin d'année
+
+$$\text{moves}_{\text{year-end}} = \frac{r_{\text{post, déc}} - \text{EFFR}}{0.25}$$
+
+---
+
+### BCE — OIS implicites
+
+#### 1. Mouvement implicite par réunion
+
+$$\Delta_{\text{bps}} = \text{round}\!\left((\text{implied\_rate} - \text{deposit\_rate}) \times 100\right)$$
+
+#### 2. Probabilités
+
+La probabilité du scénario dominant `P` est extraite directement de l'agrégateur OIS. Le scénario alternatif :
+
+$$P(\text{hold}) = \max(0,\ 100 - P)$$
+
+#### 3. Horizon fin d'année
+
+$$\text{moves}_{\text{year-end}} = \frac{\text{implied\_rate}_{\text{déc}} - \text{deposit\_rate}}{0.25}$$
 
 ---
 
@@ -33,92 +111,55 @@
 
 ```
 fed-rate-dashboard/
-├── client/                  # Front-end React + Vite
-│   ├── src/
-│   │   ├── pages/Home.tsx   # Dashboard principal (Fed + BCE)
-│   │   ├── components/      # DashboardLayout, LoginDialog, AIChatBox…
-│   │   └── _core/           # Auth, hooks, tRPC client
-│   └── public/
-│       └── logo.ico         # Favicon
-├── server/                  # Back-end Express + tRPC
-│   ├── fedwatch.ts          # Logique Fed (CME + FRED)
-│   ├── ecb.ts               # Logique BCE (ECB + OIS)
-│   ├── routers.ts           # Routes tRPC
-│   └── db.ts                # Accès base de données (Drizzle + MySQL)
-├── shared/                  # Types et constantes partagés
-└── drizzle/                 # Migrations SQL
+├── client/                        # Front-end React + Vite
+│   ├── index.html                 # Point d'entrée HTML (favicon, SEO)
+│   ├── public/
+│   │   └── logo.ico               # Favicon
+│   └── src/
+│       ├── pages/
+│       │   └── Home.tsx           # Dashboard principal (Fed + BCE)
+│       ├── components/            # DashboardLayout, LoginDialog…
+│       └── _core/                 # Auth, hooks, client tRPC
+├── server/                        # Back-end Express + tRPC
+│   ├── fedwatch.ts                # Logique Fed (CME + FRED)
+│   ├── ecb.ts                     # Logique BCE (ECB + OIS)
+│   ├── routers.ts                 # Routes tRPC
+│   └── db.ts                      # Accès BDD (Drizzle + MySQL)
+├── shared/                        # Types et constantes partagés
+└── drizzle/                       # Schéma et migrations SQL
 ```
 
-**Stack :** React 19 · TypeScript · tRPC · Drizzle ORM · MySQL · Vite · Express · Tailwind CSS v4
-
 ---
 
-## Méthodologie de calcul
+## Installation
 
-### Fed — méthode CME FedWatch
+### Prérequis
 
-La méthode est identique à celle publiée par le CME Group dans sa documentation officielle FedWatch.
+- Node.js ≥ 18
+- pnpm ≥ 10
+- MySQL 8+
 
-#### 1. Taux implicite mensuel
+### Étapes
 
-Pour chaque contrat 30-Day Fed Funds du mois M :
+```bash
+# 1. Cloner le dépôt
+git clone https://github.com/nono271105/fed-rate-dashboard.git
+cd fed-rate-dashboard
 
-$$r_M = 100 - \text{settle}_M$$
+# 2. Installer les dépendances
+pnpm install
 
-#### 2. Décomposition avant/après réunion
+# 3. Créer le fichier d'environnement
+cp .env.example .env   # puis éditer .env
 
-Soit `D` le jour de la réunion FOMC dans le mois (ex : le 28 pour janvier), et `N` le nombre total de jours du mois :
+# 4. Initialiser la base de données
+pnpm db:push
 
-$$r_{\text{pre}} = r_{M-1} \quad \text{(settlement du mois précédent)}$$
+# 5. Lancer en développement
+pnpm dev
+```
 
-$$r_{\text{post}} = \frac{r_M \cdot N - r_{\text{pre}} \cdot (D-1)}{N - D + 1}$$
-
-> **Cas limite :** Si la réunion tombe dans les 3 derniers jours du mois (peu de jours post-réunion), le taux post est lu directement sur le contrat du mois suivant M+1 pour éviter le bruit statistique.
-
-#### 3. Probabilités des scénarios
-
-Le nombre de mouvements de 25 bp implicite est :
-
-$$n = \frac{r_{\text{post}} - r_{\text{pre}}}{0.25}$$
-
-En décomposant `n` en sa partie entière et fractionnaire :
-
-$$P(\text{scénario haut}) = n - \lfloor n \rfloor$$
-$$P(\text{scénario bas}) = 1 - P(\text{scénario haut})$$
-
-Les deux scénarios correspondent aux deux fourchettes cibles adjacentes les plus proches du taux actuel.
-
-#### 4. Horizon fin d'année
-
-$$\text{moves\_year\_end} = \frac{r_{\text{post, déc}} - \text{EFFR}}{0.25}$$
-
----
-
-### BCE — méthode OIS implicite
-
-#### 1. Données sources
-- **Taux de dépôt officiel** : scrappe en temps réel le site ECB
-- **Pricing par réunion** : agrégateur public d'OIS (Overnight Index Swap) européens
-
-#### 2. Mouvement implicite
-
-$$\Delta_{\text{bps}} = \text{round}((\text{implied\_rate} - \text{deposit\_rate}) \times 100)$$
-
-#### 3. Probabilités
-
-La probabilité du mouvement dominant `P` est lue directement depuis la source OIS. La probabilité du scénario alternatif (maintien ou autre) est :
-
-$$P(\text{hold}) = \max(0,\ 100 - P)$$
-
-#### 4. Horizon fin d'année
-
-$$\text{moves\_year\_end} = \frac{\text{implied\_rate\_déc} - \text{deposit\_rate}}{0.25}$$
-
----
-
-## Variables d'environnement
-
-Créer un fichier `.env` à la racine :
+### Variables d'environnement (`.env`)
 
 ```env
 # Base de données
@@ -134,62 +175,37 @@ VITE_ANALYTICS_ENDPOINT=https://...
 VITE_ANALYTICS_WEBSITE_ID=...
 ```
 
----
+### Scripts disponibles
 
-## Lancer le projet
-
-### Prérequis
-- Node.js ≥ 18
-- pnpm ≥ 10
-- MySQL 8+
-
-### Installation
-
-```bash
-pnpm install
-```
-
-### Base de données
-
-```bash
-pnpm db:push
-```
-
-### Développement
-
-```bash
-pnpm dev
-```
-
-### Production
-
-```bash
-pnpm build
-pnpm start
-```
-
-### Tests
-
-```bash
-pnpm test
-```
+| Commande | Description |
+|---|---|
+| `pnpm dev` | Serveur de développement |
+| `pnpm build` | Build de production |
+| `pnpm start` | Démarrer en production |
+| `pnpm test` | Lancer les tests |
+| `pnpm db:push` | Générer et appliquer les migrations |
+| `pnpm check` | Vérification TypeScript |
 
 ---
 
 ## Sources de données
 
-| Source | Usage | Licence |
-|---|---|---|
-| [CME Group Settlements](https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html) | Contracts ZQ 30-Day Fed Funds | Publique (usage non-commercial) |
-| [FRED – St. Louis Fed](https://fred.stlouisfed.org/) | EFFR, DFEDTARL, DFEDTARU | Publique |
-| [ECB – taux directeurs](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/) | Dépôt, MRO, marginal | Publique |
-| [ECB – €STR](https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_short-term_rate/) | Euro Short-Term Rate | Publique |
-| Agrégateur OIS public | Pricing BCE par réunion | Publique |
+| Source | Usage |
+|:---|:---|
+| [CME Group – settlements ZQ](https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html) | Contrats 30-Day Fed Funds |
+| [FRED – St. Louis Fed](https://fred.stlouisfed.org/) | EFFR, fourchette cible Fed |
+| [ECB – taux directeurs](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/) | Taux dépôt, MRO, marginal |
+| [ECB – €STR](https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_short-term_rate/) | Euro Short-Term Rate |
+| Agrégateur public OIS | Pricing BCE par réunion |
 
-> ⚠️ **Avertissement** : Les données affichées sont à titre informatif uniquement. Elles ne constituent pas un conseil financier ou d'investissement.
+> ⚠️ **Avertissement** — Les données affichées sont à titre informatif uniquement. Elles ne constituent pas un conseil en investissement.
 
 ---
 
 ## Licence
 
-MIT
+MIT — voir [`LICENSE`](LICENSE).
+
+---
+
+*Dernière mise à jour : septembre 2026*
