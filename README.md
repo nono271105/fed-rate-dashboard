@@ -93,17 +93,17 @@ $$\text{moves}_{\text{year-end}} = \frac{r_{\text{post, déc}} - \text{EFFR}}{0.
 
 #### 1. Mouvement implicite par réunion
 
-$$\Delta_{\text{bps}} = \text{round}\!\left((\text{implied\_rate} - \text{deposit\_rate}) \times 100\right)$$
+$$\Delta_{\text{bps}} = \text{round}\left((r_{\text{implied}} - r_{\text{deposit}}) \times 100\right)$$
 
 #### 2. Probabilités
 
-La probabilité du scénario dominant `P` est extraite directement de l'agrégateur OIS. Le scénario alternatif :
+La probabilité du scénario dominant $P$ est extraite directement de l'agrégateur OIS. Le scénario alternatif :
 
-$$P(\text{hold}) = \max(0,\ 100 - P)$$
+$$P(\text{maintien}) = \max(0,\ 100 - P)$$
 
 #### 3. Horizon fin d'année
 
-$$\text{moves}_{\text{year-end}} = \frac{\text{implied\_rate}_{\text{déc}} - \text{deposit\_rate}}{0.25}$$
+$$\text{moves}_{\text{year-end}} = \frac{r_{\text{implied, déc}} - r_{\text{deposit}}}{0.25}$$
 
 ---
 
