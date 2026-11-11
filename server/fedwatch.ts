@@ -1,6 +1,5 @@
-const CME_SETTLEMENTS_URL =
-  "https://www.cmegroup.com/CmeWS/mvc/Settlements/Futures/Settlements/305/FUT";
-const FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv";
+const MASSIVE_AGGS_URL = "https://api.massive.com/futures/v1/aggs";
+const FRED_URL = "https://api.stlouisfed.org/fred/series/observations";
 const BP_STEP = 0.25;
 
 type Settlement = { month: string; settle: number };
@@ -28,7 +27,7 @@ export type MeetingSnapshot = {
 export type FedDashboardSnapshot = {
   asOfDate: string;
   updatedAt: string;
-  source: "cme+fred" | "fallback";
+  source: "massive+fred" | "fallback";
   sourceLabel: string;
   effr: number;
   targetLower: number;
@@ -159,56 +158,115 @@ export function makeScenarios(preRate: number, postRate: number, targetLower: nu
 
 function parseNumber(value: unknown) {
   if (typeof value === "number") return value;
-  if (typeof value !== "string") return null;
+  if (typeof value !== "string" || !value.trim()) return null;
   const parsed = Number(value.replace(/,/g, ""));
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-async function fetchFredSeries(seriesId: string) {
-  const end = new Date();
-  const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
-  const url = `${FRED_URL}?id=${seriesId}&cosd=${start.toISOString().slice(0, 10)}&coed=${end.toISOString().slice(0, 10)}`;
-  const response = await fetch(url, { headers: { "User-Agent": "FedRateDashboard/1.0" } });
-  if (!response.ok) throw new Error(`FRED ${seriesId} returned ${response.status}`);
-  const text = await response.text();
-  const lines = text.trim().split("\n").slice(1).reverse();
-  for (const line of lines) {
-    const value = line.split(",")[1];
-    const parsed = parseNumber(value);
+function latestFredValue(observations: unknown) {
+  if (!Array.isArray(observations)) return null;
+  for (const observation of observations) {
+    if (!observation || typeof observation !== "object" || !("value" in observation)) continue;
+    const parsed = parseNumber(observation.value);
     if (parsed !== null) return parsed;
   }
+  return null;
+}
+
+async function fetchFredSeries(seriesId: string) {
+  const apiKey = process.env.FRED_API_KEY;
+  if (!apiKey || !/^[a-z0-9]{32}$/.test(apiKey)) {
+    throw new Error("FRED_API_KEY is missing or invalid; provide a 32-character lowercase alphanumeric key");
+  }
+  const end = new Date();
+  const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const url = new URL(FRED_URL);
+  url.searchParams.set("series_id", seriesId);
+  url.searchParams.set("api_key", apiKey);
+  url.searchParams.set("file_type", "json");
+  url.searchParams.set("observation_start", start.toISOString().slice(0, 10));
+  url.searchParams.set("observation_end", end.toISOString().slice(0, 10));
+  url.searchParams.set("sort_order", "desc");
+  url.searchParams.set("limit", "10");
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { "User-Agent": "FedRateDashboard/1.0" } });
+  } catch {
+    throw new Error(`FRED ${seriesId} network request failed`);
+  }
+  if (!response.ok) throw new Error(`FRED ${seriesId} returned ${response.status}`);
+  const data = await response.json() as { observations?: unknown; error_message?: string };
+  if (data.error_message) throw new Error(`FRED ${seriesId}: ${data.error_message.replaceAll(apiKey, "[redacted]")}`);
+  const value = latestFredValue(data.observations);
+  if (value !== null) return value;
   throw new Error(`FRED ${seriesId} returned no numeric observation`);
 }
 
-function previousBusinessDay(date: Date) {
-  const result = new Date(date);
-  result.setUTCDate(result.getUTCDate() - 1);
-  while (result.getUTCDay() === 0 || result.getUTCDay() === 6) {
-    result.setUTCDate(result.getUTCDate() - 1);
+function settlementMonths(meetingDates: string[]) {
+  const months = new Set<string>();
+  for (const date of meetingDates) {
+    const [year, month, day] = date.split("-").map(Number);
+    months.add(monthKey(date));
+    months.add(previousMonthKey(date));
+    if (daysInMonth(date) - day + 1 <= 3) {
+      const next = shiftMonth(year, month, 1);
+      months.add(monthKeyFromParts(next.year, next.month));
+    }
   }
-  return result;
+  return Array.from(months);
 }
 
-async function fetchSettlements() {
-  let date = previousBusinessDay(new Date());
-  for (let attempt = 0; attempt < 5; attempt += 1) {
-    const mm = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(date.getUTCDate()).padStart(2, "0");
-    const yyyy = date.getUTCFullYear();
-    const url = `${CME_SETTLEMENTS_URL}?tradeDate=${mm}/${dd}/${yyyy}`;
-    const response = await fetch(url, { headers: { "User-Agent": "FedRateDashboard/1.0", Accept: "application/json" } });
-    if (!response.ok) throw new Error(`CME settlements returned ${response.status}`);
-    const data = await response.json() as { empty?: boolean; settlements?: Array<{ month?: string; settle?: string | number }> };
-    if (!data.empty && Array.isArray(data.settlements)) {
-      return data.settlements
-        .filter((item) => item.month && item.month !== "Total")
-        .map((item) => ({ month: item.month as string, settle: parseNumber(item.settle) }))
-        .filter((item): item is Settlement => item.settle !== null);
-    }
-    date.setUTCDate(date.getUTCDate() - 1);
-    while (date.getUTCDay() === 0 || date.getUTCDay() === 6) date.setUTCDate(date.getUTCDate() - 1);
+async function fetchSettlement(month: string) {
+  const apiKey = process.env.MASSIVE_API_KEY;
+  if (!apiKey) throw new Error("MASSIVE_API_KEY is required to fetch Fed Funds futures");
+  const [monthName, yearSuffix] = month.split(" ");
+  const monthNumberValue = Object.entries(MONTH_NAMES).find(([, name]) => name === monthName)?.[0];
+  if (!monthName || !yearSuffix || !monthNumberValue) throw new Error(`Invalid futures month: ${month}`);
+  const ticker = `ZQ${MONTH_CODES[Number(monthNumberValue)]}${yearSuffix.slice(-1)}`;
+  const end = new Date();
+  const start = new Date(end.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const url = new URL(`${MASSIVE_AGGS_URL}/${ticker}`);
+  url.searchParams.set("timespan", "1session");
+  url.searchParams.set("from", start.toISOString().slice(0, 10));
+  url.searchParams.set("to", end.toISOString().slice(0, 10));
+  url.searchParams.set("limit", "20");
+  url.searchParams.set("apiKey", apiKey);
+  let response: Response;
+  try {
+    response = await fetch(url, { headers: { "User-Agent": "FedRateDashboard/1.0" } });
+  } catch {
+    throw new Error(`Massive ${ticker} network request failed`);
   }
-  throw new Error("CME returned no settlements");
+  if (!response.ok) throw new Error(`Massive ${ticker} settlements returned ${response.status}`);
+  const data = await response.json() as { results?: unknown };
+  const settle = latestSettlement(data.results);
+  if (settle === null) throw new Error(`Massive ${ticker} returned no recent settlement price`);
+  return { month, settle };
+}
+
+function latestSettlement(results: unknown) {
+  if (!Array.isArray(results)) return null;
+  for (const result of results) {
+    if (!result || typeof result !== "object" || !("settlement_price" in result)) continue;
+    const parsed = parseNumber(result.settlement_price);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+async function fetchSettlements(meetingDates: string[]) {
+  const settlements: Settlement[] = [];
+  for (const month of settlementMonths(meetingDates)) {
+    settlements.push(await fetchSettlement(month));
+  }
+  return settlements;
+}
+
+function relevantMeetings(meetingDates: string[]) {
+  const year = todayIso().slice(0, 4);
+  const yearEnd = meetingDates.find((date) => date.startsWith(year) && date.slice(5, 7) === "12")
+    ?? meetingDates[meetingDates.length - 1];
+  return Array.from(new Set([meetingDates[0], meetingDates[1], yearEnd].filter((date): date is string => Boolean(date))));
 }
 
 export function calculateMeetings(settlements: Settlement[], meetings: string[], effr: number, targetLower: number) {
@@ -287,15 +345,16 @@ function createFallbackSnapshot(): FedDashboardSnapshot {
 }
 
 async function createLiveSnapshot(): Promise<FedDashboardSnapshot> {
+  const meetingDates = relevantMeetings(FOMC_MEETINGS.filter((date) => date >= todayIso()));
   const [effr, targetLower, targetUpper, settlements] = await Promise.all([
     fetchFredSeries("EFFR"),
     fetchFredSeries("DFEDTARL"),
     fetchFredSeries("DFEDTARU"),
-    fetchSettlements(),
+    fetchSettlements(meetingDates),
   ]);
   const meetings = calculateMeetings(
     settlements,
-    FOMC_MEETINGS.filter((date) => date >= todayIso()),
+    meetingDates,
     effr,
     targetLower,
   );
@@ -305,17 +364,19 @@ async function createLiveSnapshot(): Promise<FedDashboardSnapshot> {
   return {
     asOfDate: todayIso(),
     updatedAt: new Date().toISOString(),
-    source: "cme+fred",
-    sourceLabel: "CME settlements + FRED",
+    source: "massive+fred",
+    sourceLabel: "Massive futures + FRED API",
     effr: Math.round(effr * 1000) / 1000,
     targetLower,
     targetUpper,
     meetings,
     yearEndMoves: yearEndMeeting ? Math.round(((yearEndMeeting.postRate - effr) / BP_STEP) * 100) / 100 : 0,
     yearEndDate: yearEndMeeting?.date ?? null,
-    dataNote: "Probabilités calculées à partir des settlements CME 30-Day Fed Funds et du taux effectif EFFR publié par la Fed via FRED.",
+    dataNote: "Probabilités estimées à partir des settlements des futures 30-Day Fed Funds fournis par Massive. Les taux EFFR et les bornes cibles proviennent de l’API officielle FRED.",
   };
 }
+
+export const fedTest = { latestFredValue, latestSettlement, settlementMonths, relevantMeetings };
 
 export async function refreshFedDashboard() {
   let snapshot: FedDashboardSnapshot;

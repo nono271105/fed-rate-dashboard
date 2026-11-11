@@ -20,5 +20,15 @@ describe("ECB market parsing", () => {
   it("omits expired meetings from fallback data", () => {
     const snapshot = ecbTest.fallbackSnapshot();
     expect(snapshot.meetings.every((meeting) => meeting.date >= snapshot.asOfDate)).toBe(true);
+    expect(snapshot.marketPricingAvailable).toBe(true);
+  });
+
+  it("reads the latest numeric observation from ECB SDMX CSV", () => {
+    const csv = [
+      "TIME_PERIOD,OBS_VALUE,TITLE",
+      '2026-11-09,2.4,"Euro short-term rate, daily"',
+      '2026-11-10,2.442,"Euro short-term rate, daily"',
+    ].join("\r\n");
+    expect(ecbTest.latestSdmxObservation(csv)).toEqual({ date: "2026-11-10", value: 2.442 });
   });
 });

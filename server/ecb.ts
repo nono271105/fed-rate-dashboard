@@ -1,6 +1,4 @@
-const ECB_RATES_URL = "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html";
-const ECB_ESTR_URL = "https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_short-term_rate/html/index.en.html";
-const ECB_CALENDAR_URL = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html";
+const ECB_DATA_URL = "https://data-api.ecb.europa.eu/service/data";
 const MARKET_PRICING_URL = "https://rateprobability.com/ecb";
 
 export type EcbMeeting = {
@@ -14,21 +12,22 @@ export type EcbMeeting = {
 export type EcbDashboardSnapshot = {
   asOfDate: string;
   updatedAt: string;
-  source: "ecb+market" | "fallback";
+  source: "ecb+market" | "ecb" | "fallback";
   sourceLabel: string;
+  marketPricingAvailable: boolean;
   depositRate: number;
   refinancingRate: number;
   marginalRate: number;
   estr: number;
   estrDate: string;
   meetings: EcbMeeting[];
-  yearEndMoves: number;
+  yearEndMoves: number | null;
   yearEndDate: string | null;
   dataNote: string;
 };
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
-function number(value: string) { const parsed = Number(value.replace(/,/g, ".").replace(/[^0-9.-]/g, "")); return Number.isFinite(parsed) ? parsed : null; }
+function number(value: string) { const normalized = value.replace(/,/g, ".").replace(/[^0-9.-]/g, ""); if (!normalized || !/^-?(?:\d+\.?\d*|\.\d+)$/.test(normalized)) return null; const parsed = Number(normalized); return Number.isFinite(parsed) ? parsed : null; }
 function formatDate(date: string) {
   const parsed = /^\d{4}-\d{2}-\d{2}$/.test(date) ? new Date(`${date}T12:00:00Z`) : new Date(date);
   return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "UTC" }).format(parsed);
@@ -41,26 +40,67 @@ async function fetchText(url: string) {
   return response.text();
 }
 
+function parseCsvRow(line: string) {
+  const fields: string[] = [];
+  let field = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"' && line[index + 1] === '"' && quoted) {
+      field += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      fields.push(field);
+      field = "";
+    } else {
+      field += char;
+    }
+  }
+  fields.push(field);
+  return fields;
+}
+
+function latestSdmxObservation(csv: string) {
+  const rows = csv.split(/\r?\n/).filter(Boolean).map(parseCsvRow);
+  const headers = rows[0] ?? [];
+  const dateIndex = headers.indexOf("TIME_PERIOD");
+  const valueIndex = headers.indexOf("OBS_VALUE");
+  if (dateIndex < 0 || valueIndex < 0) return null;
+  const observations: Array<{ date: string; value: number }> = [];
+  for (const row of rows.slice(1)) {
+    const date = row[dateIndex] ?? "";
+    const value = number(row[valueIndex] ?? "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date) && value !== null) observations.push({ date, value });
+  }
+  observations.sort((left, right) => right.date.localeCompare(left.date));
+  return observations[0] ?? null;
+}
+
+async function fetchSdmxObservation(series: string) {
+  const url = new URL(`${ECB_DATA_URL}/${series}`);
+  url.searchParams.set("lastNObservations", "5");
+  url.searchParams.set("format", "csvdata");
+  const response = await fetch(url, { headers: { Accept: "text/csv" } });
+  if (!response.ok) throw new Error(`ECB SDMX series ${series} returned ${response.status}`);
+  const observation = latestSdmxObservation(await response.text());
+  if (!observation) throw new Error(`ECB SDMX series ${series} returned no numeric observation`);
+  return observation;
+}
+
 async function fetchOfficialRates() {
-  const text = cleanText(await fetchText(ECB_RATES_URL));
-  const match = text.match(/2026\s*16\s*Sep\.?\s*([0-9.]+)\s*([0-9.]+)\s*-\s*([0-9.]+)/i);
-  if (!match) throw new Error("ECB current policy rates not found");
-  return { depositRate: number(match[1])!, refinancingRate: number(match[2])!, marginalRate: number(match[3])! };
+  const [deposit, refinancing, marginal] = await Promise.all([
+    fetchSdmxObservation("FM/B.U2.EUR.4F.KR.DFR.LEV"),
+    fetchSdmxObservation("FM/B.U2.EUR.4F.KR.MRR_FR.LEV"),
+    fetchSdmxObservation("FM/B.U2.EUR.4F.KR.MLFR.LEV"),
+  ]);
+  return { depositRate: deposit.value, refinancingRate: refinancing.value, marginalRate: marginal.value };
 }
 
 async function fetchEstr() {
-  const text = cleanText(await fetchText(ECB_ESTR_URL));
-  const match = text.match(/Rate\s+([0-9.]+)\s+Reference date\s+([0-9-]+)/i);
-  if (!match) throw new Error("ECB €STR value not found");
-  return { estr: number(match[1])!, estrDate: match[2] };
-}
-
-async function fetchOfficialMeetings() {
-  const text = cleanText(await fetchText(ECB_CALENDAR_URL));
-  const matches = Array.from(text.matchAll(/(\d{2})\/(\d{2})\/(20\d{2})\s+Governing Council of the ECB: monetary policy meeting[\s\S]{0,180}?Day 1[\s\S]{0,180}?\n?\s*(\d{2})\/(\d{2})\/(20\d{2})/gi));
-  const dates = matches.map((match) => `${match[6]}-${match[5]}-${match[4]}`);
-  const simpler = Array.from(text.matchAll(/(\d{2})\/(\d{2})\/(20\d{2})\s+Governing Council of the ECB: monetary policy meeting/gi)).map((match) => `${match[3]}-${match[2]}-${match[1]}`);
-  return Array.from(new Set([...dates, ...simpler])).filter((date) => date >= todayIso()).slice(0, 10);
+  const observation = await fetchSdmxObservation("EST/B.EU000A2X2A25.WT");
+  return { estr: observation.value, estrDate: observation.date };
 }
 
 function parseMarketMeetings(text: string, depositRate: number): EcbMeeting[] {
@@ -98,16 +138,38 @@ function fallbackSnapshot(): EcbDashboardSnapshot {
   ];
   const meetings = allMeetings.filter((meeting) => meeting.date >= todayIso());
   const yearEnd = meetings.find((meeting) => meeting.date.startsWith(todayIso().slice(0, 4)) && meeting.date.slice(5, 7) === "12") ?? meetings[meetings.length - 1];
-  return { asOfDate: todayIso(), updatedAt: new Date().toISOString(), source: "fallback", sourceLabel: "ECB officiel + pricing public en cache", depositRate: 2.5, refinancingRate: 2.65, marginalRate: 2.9, estr: 2.189, estrDate: "2026-09-11", meetings, yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - 2.5) / 0.25) * 100) / 100 : 0, yearEndDate: yearEnd?.date ?? null, dataNote: "Les taux directeurs et €STR sont officiels ECB. Le pricing par réunion provient d’un agrégateur public OIS et reste une approximation indépendante de l’ECB." };
+  return { asOfDate: todayIso(), updatedAt: new Date().toISOString(), source: "fallback", sourceLabel: "Données de démonstration - BCE indisponible", marketPricingAvailable: true, depositRate: 2.5, refinancingRate: 2.65, marginalRate: 2.9, estr: 2.189, estrDate: "2026-09-11", meetings, yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - 2.5) / 0.25) * 100) / 100 : 0, yearEndDate: yearEnd?.date ?? null, dataNote: "Valeurs de démonstration prédéfinies : elles ne représentent ni les taux courants ni le pricing actuel du marché." };
 }
 
 async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
-  const [rates, estr, calendar, market] = await Promise.all([fetchOfficialRates(), fetchEstr(), fetchOfficialMeetings(), fetchText(MARKET_PRICING_URL)]);
-  if (/Just a moment|Enable JavaScript|challenge-platform|cloudflare/i.test(market)) throw new Error("Public ECB pricing provider is behind an anti-bot challenge");
-  const meetings = parseMarketMeetings(market, rates.depositRate);
-  const filtered = meetings.length ? meetings : calendar.slice(0, 4).map((date) => ({ date, impliedRate: rates.depositRate, moveBps: 0, moveProbability: 0, scenarios: [{ label: "Pricing indisponible", probability: 0, moveBps: 0, targetRate: rates.depositRate }] }));
-  const yearEnd = filtered.find((meeting) => meeting.date.startsWith(todayIso().slice(0, 4)) && meeting.date.slice(5, 7) === "12") ?? filtered[filtered.length - 1];
-  return { asOfDate: todayIso(), updatedAt: new Date().toISOString(), source: "ecb+market", sourceLabel: "ECB officiel + OIS public", ...rates, ...estr, meetings: filtered, yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - rates.depositRate) / 0.25) * 100) / 100 : 0, yearEndDate: yearEnd?.date ?? null, dataNote: "Taux directeurs et €STR : ECB. Pricing : agrégateur public d’OIS, actualisé indépendamment et susceptible de différer d’autres fournisseurs." };
+  const [rates, estr] = await Promise.all([fetchOfficialRates(), fetchEstr()]);
+  let meetings: EcbMeeting[] = [];
+  try {
+    const market = await fetchText(MARKET_PRICING_URL);
+    if (!/Just a moment|Enable JavaScript|challenge-platform|cloudflare/i.test(market)) {
+      meetings = parseMarketMeetings(market, rates.depositRate);
+    }
+    if (!meetings.length) throw new Error("OIS provider returned no upcoming meetings");
+  } catch (error) {
+    console.warn("[ECB] Market pricing unavailable:", error instanceof Error ? error.message : error);
+  }
+  const yearEnd = meetings.find((meeting) => meeting.date.startsWith(todayIso().slice(0, 4)) && meeting.date.slice(5, 7) === "12") ?? meetings[meetings.length - 1];
+  const marketPricingAvailable = meetings.length > 0;
+  return {
+    asOfDate: todayIso(),
+    updatedAt: new Date().toISOString(),
+    source: marketPricingAvailable ? "ecb+market" : "ecb",
+    sourceLabel: marketPricingAvailable ? "ECB SDMX officiel + pricing OIS" : "ECB SDMX officiel - pricing OIS indisponible",
+    marketPricingAvailable,
+    ...rates,
+    ...estr,
+    meetings,
+    yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - rates.depositRate) / 0.25) * 100) / 100 : null,
+    yearEndDate: yearEnd?.date ?? null,
+    dataNote: marketPricingAvailable
+      ? "Taux directeurs et €STR : API SDMX officielle de l’ECB. Pricing par réunion : fournisseur OIS tiers, indépendant et non officiel."
+      : "Les taux directeurs et le €STR sont à jour via l’API SDMX officielle de l’ECB. Les probabilités de décision ne sont pas publiées par l’ECB : le fournisseur OIS de marché est actuellement indisponible.",
+  };
 }
 
 export async function refreshEcbDashboard() {
@@ -116,4 +178,4 @@ export async function refreshEcbDashboard() {
   return { snapshot };
 }
 
-export const ecbTest = { parseMarketMeetings, fallbackSnapshot };
+export const ecbTest = { latestSdmxObservation, parseMarketMeetings, fallbackSnapshot };

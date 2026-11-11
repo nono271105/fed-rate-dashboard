@@ -14,40 +14,65 @@ Si une source est indisponible, le site affiche des valeurs de secours prédéfi
 
 ### Fed
 
-Sources : settlements quotidiens des contrats futures 30-Day Fed Funds du [CME](https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html) et séries de taux de la Réserve fédérale publiées par [FRED](https://fred.stlouisfed.org/). Les taux recherchés dans FRED sont l’EFFR (`EFFR`) et les bornes basse et haute de la fourchette cible (`DFEDTARL`, `DFEDTARU`).
+Sources : settlements quotidiens des contrats futures 30-Day Fed Funds récupérés via l’API [Massive](https://massive.com/docs) (produit `ZQ`) et séries officielles de la Réserve fédérale publiées par l’API [FRED](https://fred.stlouisfed.org/docs/api/fred/). Les séries FRED utilisées sont l’EFFR (`EFFR`) et les bornes basse et haute de la fourchette cible (`DFEDTARL`, `DFEDTARU`).
 
-1. Le settlement du contrat Fed Funds est converti en taux moyen implicite du mois : `taux implicite = 100 − settlement`.
-2. Pour une réunion ayant lieu le jour `d` d’un mois de `N` jours, le taux moyen attendu après la réunion est isolé en pondérant les jours avant et après celle-ci :
+Les taux ci-dessous sont exprimés en pourcentage (par exemple \(3{,}63\)), et \(P\) est le prix du future. Le taux moyen implicite du mois est :
 
-   ```text
-   taux après = (taux mensuel implicite × N − taux avant × (d − 1)) / (N − d + 1)
-   ```
+$$
+r_m = 100 - P
+$$
 
-   Le taux avant la réunion vient du contrat du mois précédent quand il est disponible ; sinon, le calcul utilise l’EFFR. Pour une réunion située dans les trois derniers jours du mois, le contrat du mois suivant est utilisé directement si disponible.
-3. Le mouvement attendu est exprimé en pas de 25 points de base : `(taux après − taux avant) / 0,25`.
-4. Les scénarios encadrent ce mouvement par les deux pas de 25 points de base adjacents. La partie décimale du mouvement détermine la probabilité du scénario supérieur ; le scénario inférieur reçoit le complément pour totaliser 100 %. Les scénarios sont ensuite présentés comme des variations par rapport à la borne basse actuelle de la fourchette cible.
+Pour une réunion le jour \(j\) d’un mois de \(D\) jours, le code compte \(j-1\) jours avant la réunion et \(D-j+1\) jours à partir de celle-ci. Le taux après réunion \(r_1\) est obtenu à partir de la moyenne mensuelle :
 
-Cette interpolation fournit une distribution simplifiée à deux scénarios à partir du taux moyen implicite. Elle ne reconstitue pas toutes les anticipations possibles ni les conventions détaillées de l’outil CME FedWatch.
+$$
+r_m = \frac{(j-1)r_0 + (D-j+1)r_1}{D}
+\qquad\Longrightarrow\qquad
+r_1 = \frac{D r_m - (j-1)r_0}{D-j+1}
+$$
+
+Ici, \(r_0\) est le taux avant réunion : celui du future du mois précédent s’il existe, sinon l’EFFR. Si la réunion est dans les trois derniers jours du mois, le future du mois suivant est utilisé directement lorsqu’il est disponible.
+
+Le mouvement attendu en nombre de pas de 25 points de base est \(m=(r_1-r_0)/0{,}25\). Pour \(n=\lfloor m\rfloor\) pas, \(q\) est la probabilité du scénario à \(n+1\) pas ; le scénario à \(n\) pas reçoit le complément :
+
+$$
+n=\lfloor m\rfloor,\qquad q=m-n,\qquad
+p_n=1-q,\qquad p_{n+1}=q
+$$
+
+Les scénarios sont exprimés par rapport à la fourchette cible actuelle. Cette interpolation à deux scénarios est une approximation ; elle ne reproduit pas toute la méthode CME FedWatch.
+
+À l’horizon annuel, le nombre moyen de hausses intégrées au pricing est calculé par \(N=(r_{\mathrm{horizon}}-\mathrm{EFFR})/0{,}25\). Il s’agit d’une moyenne de marché, pas d’un nombre littéral de décisions.
 
 ### BCE
 
-Les taux directeurs et le dernier €STR proviennent des pages de la [BCE](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html). Le pricing des réunions est lu sur [RateProbability](https://rateprobability.com/ecb), un fournisseur public tiers de données OIS ; il ne s’agit pas de probabilités officielles de la BCE.
+Les taux directeurs et le dernier €STR proviennent de l’API SDMX officielle du [portail de données de la BCE](https://data.ecb.europa.eu/help/api/overview). Le pricing des réunions est lu sur [RateProbability](https://rateprobability.com/ecb), un fournisseur public tiers de données OIS ; il ne s’agit pas de probabilités officielles de la BCE. Si ce fournisseur est indisponible, le tableau affiche les taux officiels mais masque les probabilités et horizons de marché au lieu d’afficher des valeurs trompeuses.
 
-Pour chaque réunion fournie par cette source :
+Pour chaque réunion, la variation implicite en points de base est calculée à partir du taux de dépôt actuel \(r_D\) et du taux OIS implicite \(r_I\), exprimés en pourcentage :
 
-1. La variation implicite en points de base est calculée par `(taux implicite − taux de dépôt BCE) × 100`.
-2. Cette variation est arrondie au pas de 25 points de base le plus proche pour obtenir le scénario de mouvement affiché.
-3. Le scénario de mouvement reprend la probabilité publiée par le fournisseur. Le scénario « maintien / autre » reçoit le complément à 100 %, lorsque celui-ci est positif.
-4. L’horizon annuel convertit l’écart entre le taux implicite de fin d’année et le taux de dépôt courant en équivalent de 25 points de base : `(taux implicite − taux de dépôt) / 0,25`.
+$$
+\Delta r_{\mathrm{bp}} = 100(r_I-r_D)
+$$
 
-Le taux implicite et sa probabilité dépendent du fournisseur OIS et de sa méthode. L’arrondi à 25 points de base est une simplification de présentation ; les résultats peuvent différer d’autres sources de marché.
+Le scénario affiché est arrondi au pas de 25 points de base le plus proche ; sa probabilité provient du fournisseur. Le scénario « maintien / autre » reçoit le complément à 100 % lorsqu’il est positif. À titre d’interprétation, un taux implicite peut aussi être vu comme une moyenne pondérée des taux des scénarios :
+
+$$
+r_I=\sum_{i=1}^{n}p_i r_i,\qquad \sum_{i=1}^{n}p_i=1
+$$
+
+L’équivalent en mouvements de 25 points de base à l’horizon annuel est :
+
+$$
+N_{\mathrm{BCE}}=\frac{r_{\mathrm{horizon}}-r_D}{0{,}25\%}
+$$
+
+La probabilité publiée et le taux implicite dépendent du fournisseur OIS ; l’arrondi à 25 points de base est une simplification de présentation.
 
 ## Données et limites
 
 - Les réunions affichées sont les réunions futures disponibles dans les données reçues.
-- Les données CME, FRED, BCE et OIS peuvent être publiées à des heures différentes ou être temporairement indisponibles.
+- Les données Massive, FRED, BCE et OIS peuvent être publiées à des heures différentes ou être temporairement indisponibles. L’API BCE fournit les taux officiels, pas les anticipations de marché par réunion.
 - Les valeurs de secours sont codées dans le projet pour préserver l’affichage en cas d’échec des sources ; elles ne sont pas actualisées automatiquement.
-- Aucune base de données ni variable d’environnement n’est nécessaire. Les appels API récupèrent les données à la demande et ne conservent pas d’historique.
+- Les taux BCE sont accessibles sans clé. Le volet Fed nécessite `FRED_API_KEY` et `MASSIVE_API_KEY`. Les appels API récupèrent les données à la demande et ne conservent pas d’historique en base.
 
 ## Développement local
 
@@ -73,7 +98,8 @@ pnpm build  # Construire le site et le serveur
 1. Importer le dépôt [`nono271105/fed-rate-dashboard`](https://github.com/nono271105/fed-rate-dashboard) dans Vercel.
 2. Conserver la racine du dépôt comme **Root Directory**.
 3. Garder la configuration de [`vercel.json`](./vercel.json) : installation pnpm, commande `pnpm build` et fichiers statiques dans `dist/public`. L’API est exposée par le dossier [`api/`](./api/).
-4. Lancer le déploiement. Aucune variable d’environnement n’est requise pour le fonctionnement de base.
+4. Dans **Settings → Environment Variables**, ajouter `FRED_API_KEY` (clé FRED valide de 32 caractères minuscules alphanumériques) et `MASSIVE_API_KEY` (clé Massive avec accès aux futures CME Fed Funds). Ajouter les mêmes variables dans un fichier local `.env` pour le développement ; ne jamais committer ce fichier ni publier les clés.
+5. Redéployer après avoir enregistré les variables. Sans l’une de ces clés, le volet Fed utilise ses valeurs de secours. Les taux officiels BCE restent accessibles sans clé, mais les probabilités BCE dépendent de la disponibilité du fournisseur OIS tiers.
 
 ## Organisation du code
 

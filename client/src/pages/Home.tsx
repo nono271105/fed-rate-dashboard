@@ -48,7 +48,7 @@ function FedView({ onRefresh, refreshing }: { onRefresh: () => void; refreshing:
     <section className="detail-grid">
       <DistributionCard title="Prochaine décision" eyebrow="Lecture immédiate" scenarios={[{ moveBps: 25, probability: hike, label: "" }, { moveBps: 0, probability: hold, label: "" }, { moveBps: -25, probability: cut, label: "" }]} accent="fed" />
     </section>
-    <SourceNote accent="fed">{snapshot.dataNote} <a href="https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html" target="_blank" rel="noreferrer">Méthode CME FedWatch <ChevronRight size={14} /></a></SourceNote>
+    <SourceNote accent="fed"><strong>{snapshot.sourceLabel}.</strong> {snapshot.dataNote} <a href="https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html" target="_blank" rel="noreferrer">Méthode CME FedWatch <ChevronRight size={14} /></a></SourceNote>
     {refreshing && <span className="refresh-status"><RefreshCw size={14} className="spin" /> Actualisation…</span>}
   </>;
 }
@@ -61,22 +61,24 @@ function EcbView({ onRefresh, refreshing }: { onRefresh: () => void; refreshing:
   const next = snapshot.meetings[0] as EcbMeeting | undefined;
   const following = snapshot.meetings[1] as EcbMeeting | undefined;
   return <>
-    <HeaderBlock eyebrow="BCE - Banque centrale européenne" title={<>Ce que le marché <em className="ecb-ink">price</em> pour la BCE.</>} description="Taux officiels de l’ECB et trajectoire implicite du taux de dépôt, réunion par réunion." />
+    <HeaderBlock eyebrow="BCE - Banque centrale européenne" title={<>Ce que le marché <em className="ecb-ink">price</em> pour la BCE.</>} description={snapshot.marketPricingAvailable ? "Taux officiels de l’ECB et trajectoire implicite du taux de dépôt, réunion par réunion." : "Taux officiels de l’ECB à jour. Les probabilités de marché ne sont pas disponibles actuellement."} />
     <section className="metric-grid" aria-label="Résumé BCE">
       <Metric label="Taux de dépôt" value={rateLabel(snapshot.depositRate)} detail={`MRO ${rateLabel(snapshot.refinancingRate)} - facilité marginale ${rateLabel(snapshot.marginalRate)}`} accent="violet" />
       <Metric label="Dernier €STR" value={rateLabel(snapshot.estr)} detail={`Référence ECB - ${dateLabel(snapshot.estrDate)}`} />
-      <Metric label="Horizon global" value={`${snapshot.yearEndMoves.toFixed(2)} × 25 bp`} detail={`Jusqu’au ${dateLabel(snapshot.yearEndDate)}`} accent="violet" />
+      <Metric label="Horizon global" value={snapshot.yearEndMoves === null ? "Indisponible" : `${snapshot.yearEndMoves.toFixed(2)} × 25 bp`} detail={snapshot.yearEndDate ? `Jusqu’au ${dateLabel(snapshot.yearEndDate)}` : "Pricing OIS indisponible"} accent="violet" />
     </section>
-    <SectionHeading eyebrow="01 - Réunions" title="Trajectoire implicite BCE" />
-    <section className="meeting-grid">
-      {next && <MeetingCard accent="ecb" eyebrow="Prochaine réunion" title={dateLabel(next.date)} code="ECB" before={snapshot.depositRate} after={next.impliedRate} scenarios={next.scenarios} dominant={`${next.moveProbability.toFixed(1)}% - ${moveName(next.moveBps)}`} />}
-      {following && <MeetingCard accent="ecb" eyebrow="Réunion suivante" title={dateLabel(following.date)} code="ECB" before={snapshot.depositRate} after={following.impliedRate} scenarios={following.scenarios} dominant={`${following.moveProbability.toFixed(1)}% - ${moveName(following.moveBps)}`} />}
-      <HorizonCard accent="ecb" reference={`Taux de dépôt ${rateLabel(snapshot.depositRate)}`} title="Fin d’année" value={snapshot.yearEndMoves} date={snapshot.yearEndDate} description="Variation cumulée équivalente de 25 bp, déduite du taux de dépôt implicite pour la réunion de décembre." />
-    </section>
-    <section className="detail-grid">
-      <DistributionCard title="Prochaine décision" eyebrow="Lecture immédiate" scenarios={next?.scenarios ?? []} accent="ecb" />
-    </section>
-    <SourceNote accent="ecb">{snapshot.dataNote} <a href="https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html" target="_blank" rel="noreferrer">Taux officiels ECB <ChevronRight size={14} /></a></SourceNote>
+    {snapshot.marketPricingAvailable && <>
+      <SectionHeading eyebrow="01 - Réunions" title="Trajectoire implicite BCE" />
+      <section className="meeting-grid">
+        {next && <MeetingCard accent="ecb" eyebrow="Prochaine réunion" title={dateLabel(next.date)} code="ECB" before={snapshot.depositRate} after={next.impliedRate} scenarios={next.scenarios} dominant={`${next.moveProbability.toFixed(1)}% - ${moveName(next.moveBps)}`} />}
+        {following && <MeetingCard accent="ecb" eyebrow="Réunion suivante" title={dateLabel(following.date)} code="ECB" before={snapshot.depositRate} after={following.impliedRate} scenarios={following.scenarios} dominant={`${following.moveProbability.toFixed(1)}% - ${moveName(following.moveBps)}`} />}
+        {snapshot.yearEndMoves !== null && <HorizonCard accent="ecb" reference={`Taux de dépôt ${rateLabel(snapshot.depositRate)}`} title="Fin d’année" value={snapshot.yearEndMoves} date={snapshot.yearEndDate} description="Variation cumulée équivalente de 25 bp, déduite du taux de dépôt implicite pour la réunion de décembre." />}
+      </section>
+      <section className="detail-grid">
+        <DistributionCard title="Prochaine décision" eyebrow="Lecture immédiate" scenarios={next?.scenarios ?? []} accent="ecb" />
+      </section>
+    </>}
+    <SourceNote accent="ecb"><strong>{snapshot.sourceLabel}.</strong> {snapshot.dataNote} <a href="https://data.ecb.europa.eu/help/api/overview" target="_blank" rel="noreferrer">API SDMX ECB <ChevronRight size={14} /></a></SourceNote>
     {refreshing && <span className="refresh-status"><RefreshCw size={14} className="spin" /> Actualisation…</span>}
   </>;
 }
