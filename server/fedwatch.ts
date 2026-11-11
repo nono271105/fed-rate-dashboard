@@ -1,3 +1,7 @@
+import "dotenv/config";
+import fs from "node:fs";
+import path from "node:path";
+
 const MASSIVE_AGGS_URL = "https://api.massive.com/futures/v1/aggs";
 const FRED_URL = "https://api.stlouisfed.org/fred/series/observations";
 const BP_STEP = 0.25;
@@ -66,6 +70,41 @@ const MONTH_NAMES: Record<number, string> = {
   1: "JAN", 2: "FEB", 3: "MAR", 4: "APR", 5: "MAY", 6: "JUN",
   7: "JUL", 8: "AUG", 9: "SEP", 10: "OCT", 11: "NOV", 12: "DEC",
 };
+
+// Persistent disk + memory cache to withstand server restarts and 5 req/min rate limits
+const CACHE_DIR = path.join(process.cwd(), ".cache");
+const CACHE_FILE = path.join(CACHE_DIR, "fed-cache.json");
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+
+type CacheStore = {
+  settlements: Record<string, { settle: number; timestamp: number }>;
+  fred: Record<string, { value: number; timestamp: number }>;
+};
+
+function readPersistentStore(): CacheStore {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const content = fs.readFileSync(CACHE_FILE, "utf8");
+      return JSON.parse(content) as CacheStore;
+    }
+  } catch {
+    // Ignore read errors
+  }
+  return { settlements: {}, fred: {} };
+}
+
+function writePersistentStore(store: CacheStore) {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(store, null, 2), "utf8");
+  } catch {
+    // Ignore write errors (e.g. read-only filesystem)
+  }
+}
+
+const memoryStore: CacheStore = readPersistentStore();
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -173,9 +212,15 @@ function latestFredValue(observations: unknown) {
   return null;
 }
 
-async function fetchFredSeries(seriesId: string) {
+async function fetchFredSeries(seriesId: string): Promise<number> {
+  const cached = memoryStore.fred[seriesId];
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.value;
+  }
+
   const apiKey = process.env.FRED_API_KEY;
   if (!apiKey || !/^[a-z0-9]{32}$/.test(apiKey)) {
+    if (cached) return cached.value;
     throw new Error("FRED_API_KEY is missing or invalid; provide a 32-character lowercase alphanumeric key");
   }
   const end = new Date();
@@ -188,17 +233,30 @@ async function fetchFredSeries(seriesId: string) {
   url.searchParams.set("observation_end", end.toISOString().slice(0, 10));
   url.searchParams.set("sort_order", "desc");
   url.searchParams.set("limit", "10");
+
   let response: Response;
   try {
     response = await fetch(url, { headers: { "User-Agent": "FedRateDashboard/1.0" } });
   } catch {
+    if (cached) return cached.value;
     throw new Error(`FRED ${seriesId} network request failed`);
   }
-  if (!response.ok) throw new Error(`FRED ${seriesId} returned ${response.status}`);
+  if (!response.ok) {
+    if (cached) return cached.value;
+    throw new Error(`FRED ${seriesId} returned ${response.status}`);
+  }
   const data = await response.json() as { observations?: unknown; error_message?: string };
-  if (data.error_message) throw new Error(`FRED ${seriesId}: ${data.error_message.replaceAll(apiKey, "[redacted]")}`);
+  if (data.error_message) {
+    if (cached) return cached.value;
+    throw new Error(`FRED ${seriesId}: ${data.error_message.replaceAll(apiKey, "[redacted]")}`);
+  }
   const value = latestFredValue(data.observations);
-  if (value !== null) return value;
+  if (value !== null) {
+    memoryStore.fred[seriesId] = { value, timestamp: Date.now() };
+    writePersistentStore(memoryStore);
+    return value;
+  }
+  if (cached) return cached.value;
   throw new Error(`FRED ${seriesId} returned no numeric observation`);
 }
 
@@ -216,9 +274,39 @@ function settlementMonths(meetingDates: string[]) {
   return Array.from(months);
 }
 
-async function fetchSettlement(month: string) {
+function latestSettlement(results: unknown) {
+  if (!Array.isArray(results)) return null;
+  for (const result of results) {
+    if (!result || typeof result !== "object" || !("settlement_price" in result)) continue;
+    const parsed = parseNumber(result.settlement_price);
+    if (parsed !== null) return parsed;
+  }
+  return null;
+}
+
+function latestPriceOrSettlement(results: unknown): number | null {
+  const settle = latestSettlement(results);
+  if (settle !== null) return settle;
+  if (!Array.isArray(results)) return null;
+  for (const result of results) {
+    if (!result || typeof result !== "object") continue;
+    const close = parseNumber((result as Record<string, unknown>).close);
+    if (close !== null) return close;
+  }
+  return null;
+}
+
+async function fetchSettlement(month: string): Promise<Settlement> {
+  const cached = memoryStore.settlements[month];
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return { month, settle: cached.settle };
+  }
+
   const apiKey = process.env.MASSIVE_API_KEY;
-  if (!apiKey) throw new Error("MASSIVE_API_KEY is required to fetch Fed Funds futures");
+  if (!apiKey) {
+    if (cached) return { month, settle: cached.settle };
+    throw new Error("MASSIVE_API_KEY is required to fetch Fed Funds futures");
+  }
   const [monthName, yearSuffix] = month.split(" ");
   const monthNumberValue = Object.entries(MONTH_NAMES).find(([, name]) => name === monthName)?.[0];
   if (!monthName || !yearSuffix || !monthNumberValue) throw new Error(`Invalid futures month: ${month}`);
@@ -231,32 +319,55 @@ async function fetchSettlement(month: string) {
   url.searchParams.set("to", end.toISOString().slice(0, 10));
   url.searchParams.set("limit", "20");
   url.searchParams.set("apiKey", apiKey);
+
   let response: Response;
   try {
     response = await fetch(url, { headers: { "User-Agent": "FedRateDashboard/1.0" } });
-  } catch {
+  } catch (error) {
+    if (cached) return { month, settle: cached.settle };
     throw new Error(`Massive ${ticker} network request failed`);
   }
-  if (!response.ok) throw new Error(`Massive ${ticker} settlements returned ${response.status}`);
-  const data = await response.json() as { results?: unknown };
-  const settle = latestSettlement(data.results);
-  if (settle === null) throw new Error(`Massive ${ticker} returned no recent settlement price`);
+
+  if (response.status === 429) {
+    if (cached) {
+      console.warn(`[Massive] Rate limited on ${ticker}, using cached settlement: ${cached.settle}`);
+      return { month, settle: cached.settle };
+    }
+    throw new Error(`Massive ${ticker} rate limit exceeded (429)`);
+  }
+
+  if (!response.ok) {
+    if (cached) return { month, settle: cached.settle };
+    throw new Error(`Massive ${ticker} settlements returned ${response.status}`);
+  }
+
+  const data = await response.json() as { results?: unknown; status?: string; error?: string };
+  if (data.status === "ERROR" || data.error) {
+    if (cached) {
+      console.warn(`[Massive] API error on ${ticker}, using cached settlement: ${cached.settle}`);
+      return { month, settle: cached.settle };
+    }
+    throw new Error(`Massive ${ticker}: ${data.error ?? "API error"}`);
+  }
+
+  const settle = latestPriceOrSettlement(data.results);
+  if (settle === null) {
+    if (cached) return { month, settle: cached.settle };
+    throw new Error(`Massive ${ticker} returned no recent settlement price`);
+  }
+
+  memoryStore.settlements[month] = { settle, timestamp: Date.now() };
+  writePersistentStore(memoryStore);
   return { month, settle };
 }
 
-function latestSettlement(results: unknown) {
-  if (!Array.isArray(results)) return null;
-  for (const result of results) {
-    if (!result || typeof result !== "object" || !("settlement_price" in result)) continue;
-    const parsed = parseNumber(result.settlement_price);
-    if (parsed !== null) return parsed;
-  }
-  return null;
-}
-
 async function fetchSettlements(meetingDates: string[]) {
+  const months = settlementMonths(meetingDates);
   const settlements: Settlement[] = [];
-  for (const month of settlementMonths(meetingDates)) {
+  for (const month of months) {
+    if (!memoryStore.settlements[month] || Date.now() - memoryStore.settlements[month].timestamp >= CACHE_TTL_MS) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
     settlements.push(await fetchSettlement(month));
   }
   return settlements;
@@ -271,81 +382,108 @@ function relevantMeetings(meetingDates: string[]) {
 
 export function calculateMeetings(settlements: Settlement[], meetings: string[], effr: number, targetLower: number) {
   const settlementMap = new Map(settlements.map((item) => [item.month, item.settle]));
-  return meetings
-    .map((date) => {
-      const currentMonthKey = monthKey(date);
-      const settlement = settlementMap.get(currentMonthKey);
-      if (settlement === undefined) return null;
-      const day = Number(date.slice(-2));
-      const totalDays = daysInMonth(date);
-      const postDays = totalDays - day + 1;
-      const preRate = settlementMap.has(previousMonthKey(date))
-        ? 100 - (settlementMap.get(previousMonthKey(date)) as number)
-        : effr;
-      const impliedMonthlyRate = 100 - settlement;
-      const nextSettlement = settlementMap.get(nextMonthKey(date));
-      const postRate = postDays <= 3 && nextSettlement !== undefined
-        ? 100 - nextSettlement
-        : (impliedMonthlyRate * totalDays - preRate * (day - 1)) / Math.max(1, postDays);
-      const scenarios = makeScenarios(preRate, postRate, targetLower);
-      const dominant = [...scenarios].sort((a, b) => b.probability - a.probability)[0];
-      return {
-        date,
-        contract: contractCode(date),
-        preRate: Math.round(preRate * 1000) / 1000,
-        postRate: Math.round(postRate * 1000) / 1000,
-        impliedMonthlyRate: Math.round(impliedMonthlyRate * 1000) / 1000,
-        expectedMoves: Math.round(((postRate - preRate) / BP_STEP) * 100) / 100,
-        dominantScenario: dominant.label,
-        scenarios,
-      } satisfies MeetingSnapshot;
-    })
-    .filter((item): item is MeetingSnapshot => item !== null);
+  const sortedMeetings = [...meetings].sort();
+  const results: MeetingSnapshot[] = [];
+  let previousPostRate: number | null = null;
+
+  for (const date of sortedMeetings) {
+    const currentMonthKey = monthKey(date);
+    const settlement = settlementMap.get(currentMonthKey);
+    if (settlement === undefined) continue;
+    const day = Number(date.slice(-2));
+    const totalDays = daysInMonth(date);
+    const postDays = totalDays - day + 1;
+
+    let preRate: number;
+    if (previousPostRate !== null) {
+      preRate = previousPostRate;
+    } else if (settlementMap.has(previousMonthKey(date))) {
+      preRate = 100 - (settlementMap.get(previousMonthKey(date)) as number);
+    } else {
+      preRate = effr;
+    }
+
+    const impliedMonthlyRate = 100 - settlement;
+    const nextSettlement = settlementMap.get(nextMonthKey(date));
+    const postRate = postDays <= 3 && nextSettlement !== undefined
+      ? 100 - nextSettlement
+      : (impliedMonthlyRate * totalDays - preRate * (day - 1)) / Math.max(1, postDays);
+
+    const scenarios = makeScenarios(preRate, postRate, targetLower);
+    const dominant = [...scenarios].sort((a, b) => b.probability - a.probability)[0];
+
+    results.push({
+      date,
+      contract: contractCode(date),
+      preRate: Math.round(preRate * 1000) / 1000,
+      postRate: Math.round(postRate * 1000) / 1000,
+      impliedMonthlyRate: Math.round(impliedMonthlyRate * 1000) / 1000,
+      expectedMoves: Math.round(((postRate - preRate) / BP_STEP) * 100) / 100,
+      dominantScenario: dominant.label,
+      scenarios,
+    });
+
+    previousPostRate = postRate;
+  }
+
+  return results;
 }
 
 function fallbackMeetings(targetLower: number): MeetingSnapshot[] {
-  const examples = [
-    { date: "2026-09-16", implied: 3.71, post: 3.80 },
-    { date: "2026-10-28", implied: 3.93, post: 3.95 },
-    { date: "2026-12-09", implied: 4.08, post: 4.10 },
-    { date: "2027-01-27", implied: 4.12, post: 4.16 },
-  ];
-  return examples.map(({ date, implied, post }) => {
-    const preRate = 3.63;
-    const scenarios = makeScenarios(preRate, post, targetLower);
+  const today = todayIso();
+  const futureFomc = FOMC_MEETINGS.filter((d) => d >= today);
+  const selectedDates = relevantMeetings(futureFomc);
+
+  const fallbackQuotes: Record<string, { implied: number; post: number }> = {
+    "2026-12-09": { implied: 4.08, post: 4.14 },
+    "2027-01-27": { implied: 4.17, post: 4.31 },
+    "2027-03-17": { implied: 4.25, post: 4.38 },
+  };
+
+  let preRate = 3.88;
+  return selectedDates.map((date) => {
+    const quote = fallbackQuotes[date] ?? { implied: preRate + 0.15, post: preRate + 0.20 };
+    const scenarios = makeScenarios(preRate, quote.post, targetLower);
     const dominant = [...scenarios].sort((a, b) => b.probability - a.probability)[0];
-    return {
+    const snap: MeetingSnapshot = {
       date,
       contract: contractCode(date),
-      preRate,
-      postRate: post,
-      impliedMonthlyRate: implied,
-      expectedMoves: Math.round(((post - preRate) / BP_STEP) * 100) / 100,
+      preRate: Math.round(preRate * 1000) / 1000,
+      postRate: Math.round(quote.post * 1000) / 1000,
+      impliedMonthlyRate: quote.implied,
+      expectedMoves: Math.round(((quote.post - preRate) / BP_STEP) * 100) / 100,
       dominantScenario: dominant.label,
       scenarios,
     };
+    preRate = quote.post;
+    return snap;
   });
 }
 
 function createFallbackSnapshot(): FedDashboardSnapshot {
-  const meetings = fallbackMeetings(3.5);
+  const meetings = fallbackMeetings(3.75);
+  const today = todayIso();
+  const year = today.slice(0, 4);
+  const yearEndMeeting = meetings.find((m) => m.date.startsWith(year) && m.date.slice(5, 7) === "12") ?? meetings[meetings.length - 1];
+  const yearEndMoves = yearEndMeeting ? Math.round(((yearEndMeeting.postRate - 3.88) / BP_STEP) * 100) / 100 : 0;
   return {
-    asOfDate: todayIso(),
+    asOfDate: today,
     updatedAt: new Date().toISOString(),
     source: "fallback",
     sourceLabel: "Mode démonstration - CME non connecté",
-    effr: 3.63,
-    targetLower: 3.5,
-    targetUpper: 3.75,
+    effr: 3.88,
+    targetLower: 3.75,
+    targetUpper: 4.0,
     meetings,
-    yearEndMoves: 1.88,
-    yearEndDate: "2026-12-09",
+    yearEndMoves,
+    yearEndDate: yearEndMeeting?.date ?? null,
     dataNote: "Les probabilités affichées sont un exemple calculé à partir de la méthode FedWatch. Branche une source CME officielle pour passer aux données de marché du jour.",
   };
 }
 
 async function createLiveSnapshot(): Promise<FedDashboardSnapshot> {
-  const meetingDates = relevantMeetings(FOMC_MEETINGS.filter((date) => date >= todayIso()));
+  const upcomingMeetings = FOMC_MEETINGS.filter((date) => date >= todayIso());
+  const meetingDates = relevantMeetings(upcomingMeetings);
   const [effr, targetLower, targetUpper, settlements] = await Promise.all([
     fetchFredSeries("EFFR"),
     fetchFredSeries("DFEDTARL"),
@@ -376,7 +514,7 @@ async function createLiveSnapshot(): Promise<FedDashboardSnapshot> {
   };
 }
 
-export const fedTest = { latestFredValue, latestSettlement, settlementMonths, relevantMeetings };
+export const fedTest = { latestFredValue, latestSettlement, latestPriceOrSettlement, settlementMonths, relevantMeetings };
 
 export async function refreshFedDashboard() {
   let snapshot: FedDashboardSnapshot;

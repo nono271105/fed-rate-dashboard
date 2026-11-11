@@ -30,7 +30,9 @@ r_m = \frac{(j-1)r_0 + (D-j+1)r_1}{D}
 r_1 = \frac{D r_m - (j-1)r_0}{D-j+1}
 $$
 
-Ici, \(r_0\) est le taux avant réunion : celui du future du mois précédent s’il existe, sinon l’EFFR. Si la réunion est dans les trois derniers jours du mois, le future du mois suivant est utilisé directement lorsqu’il est disponible.
+Ici, \(r_0\) est le taux en vigueur avant la réunion : lorsqu’une réunion antérieure a déjà été évaluée dans la séquence, \(r_0\) correspond au taux post-réunion de celle-ci (\(r_1\) de la décision précédente) ; pour la première décision, il provient du future du mois précédent s’il existe sans réunion intermédiaire, sinon du taux effectif EFFR. Si la réunion est dans les trois derniers jours du mois, le future du mois suivant est utilisé directement lorsqu’il est disponible.
+
+Un système de cache en mémoire et persistant (TTL 15 minutes) protège les quotas de l'API Massive (5 requêtes par minute) et assure la continuité de service même en cas de limitations temporaires ou de séances de négociation en cours sans prix de règlement officiel du jour.
 
 Le mouvement attendu en nombre de pas de 25 points de base est \(m=(r_1-r_0)/0{,}25\). Pour \(n=\lfloor m\rfloor\) pas, \(q\) est la probabilité du scénario à \(n+1\) pas ; le scénario à \(n\) pas reçoit le complément :
 
@@ -45,7 +47,7 @@ Les scénarios sont exprimés par rapport à la fourchette cible actuelle. Cette
 
 ### BCE
 
-Les taux directeurs et le dernier €STR proviennent de l’API SDMX officielle du [portail de données de la BCE](https://data.ecb.europa.eu/help/api/overview). Le pricing des réunions est lu sur [RateProbability](https://rateprobability.com/ecb), un fournisseur public tiers de données OIS ; il ne s’agit pas de probabilités officielles de la BCE. Si ce fournisseur est indisponible, le tableau affiche les taux officiels mais masque les probabilités et horizons de marché au lieu d’afficher des valeurs trompeuses.
+Les taux directeurs et le dernier €STR proviennent de l’API SDMX officielle du [portail de données de la BCE](https://data.ecb.europa.eu/help/api/overview). Le pricing des réunions s’appuie sur le fournisseur public tiers de données OIS [RateProbability](https://rateprobability.com/ecb) ou, en cas d’indisponibilité ou de challenge anti-bot, sur le calendrier officiel du Conseil des gouverneurs de la BCE combiné à la structure forward des taux monétaires européens.
 
 Pour chaque réunion, la variation implicite en points de base est calculée à partir du taux de dépôt actuel \(r_D\) et du taux OIS implicite \(r_I\), exprimés en pourcentage :
 
