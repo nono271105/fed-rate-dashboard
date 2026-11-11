@@ -3,8 +3,8 @@
   "outputDirectory": "dist/public",
   "rewrites": [
     {
-      "source": "/api/(.*)",
-      "destination": "/api"
+      "source": "/api/trpc/(.*)",
+      "destination": "/api/trpc/$1"
     },
     {
       "source": "/((?!api/).*)",

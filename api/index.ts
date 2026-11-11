@@ -1,8 +1,16 @@
 import "dotenv/config";
-import { createApiApp } from "../server/_core/api";
+import { nodeHTTPRequestHandler } from "@trpc/server/adapters/node-http";
+import { appRouter } from "../server/routers";
+import { createContext } from "../server/_core/context";
 
-const app = createApiApp();
-
-export default function handler(req: any, res: any) {
-  return app(req, res);
+export default async function handler(req: any, res: any) {
+  const url = req.url || "";
+  const path = url.replace(/^.*\/trpc\/?/, "").split("?")[0] || "";
+  return nodeHTTPRequestHandler({
+    req,
+    res,
+    router: appRouter,
+    createContext,
+    path,
+  });
 }

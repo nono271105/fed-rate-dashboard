@@ -1,6 +1,7 @@
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import https from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -54,7 +55,7 @@ export const ECB_GOVERNING_COUNCIL_MEETINGS = [
   "2027-12-16",
 ];
 
-const CACHE_DIR = path.join(process.cwd(), ".cache");
+const CACHE_DIR = path.join(os.tmpdir(), "rates-cache");
 const CACHE_FILE = path.join(CACHE_DIR, "ecb-cache.json");
 const ECB_CACHE_TTL_MS = 15 * 60 * 1000; // 15 min
 

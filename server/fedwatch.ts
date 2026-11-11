@@ -1,6 +1,7 @@
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 
 const MASSIVE_AGGS_URL = "https://api.massive.com/futures/v1/aggs";
 const FRED_URL = "https://api.stlouisfed.org/fred/series/observations";
@@ -72,7 +73,7 @@ const MONTH_NAMES: Record<number, string> = {
 };
 
 // Persistent disk + memory cache to withstand server restarts and 5 req/min rate limits
-const CACHE_DIR = path.join(process.cwd(), ".cache");
+const CACHE_DIR = path.join(os.tmpdir(), "rates-cache");
 const CACHE_FILE = path.join(CACHE_DIR, "fed-cache.json");
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 

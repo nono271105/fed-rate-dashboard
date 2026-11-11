@@ -1,15 +1,12 @@
 // api/index.ts
 import "dotenv/config";
-
-// server/_core/api.ts
-import "dotenv/config";
-import express from "express";
-import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import { nodeHTTPRequestHandler } from "@trpc/server/adapters/node-http";
 
 // server/ecb.ts
 import "dotenv/config";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import https from "node:https";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -34,7 +31,7 @@ var ECB_GOVERNING_COUNCIL_MEETINGS = [
   "2027-10-28",
   "2027-12-16"
 ];
-var CACHE_DIR = path.join(process.cwd(), ".cache");
+var CACHE_DIR = path.join(os.tmpdir(), "rates-cache");
 var CACHE_FILE = path.join(CACHE_DIR, "ecb-cache.json");
 var ECB_CACHE_TTL_MS = 15 * 60 * 1e3;
 function readPersistentStore() {
@@ -372,6 +369,7 @@ async function refreshEcbDashboard() {
 import "dotenv/config";
 import fs2 from "node:fs";
 import path2 from "node:path";
+import os2 from "node:os";
 var MASSIVE_AGGS_URL = "https://api.massive.com/futures/v1/aggs";
 var FRED_URL = "https://api.stlouisfed.org/fred/series/observations";
 var BP_STEP = 0.25;
@@ -421,7 +419,7 @@ var MONTH_NAMES = {
   11: "NOV",
   12: "DEC"
 };
-var CACHE_DIR2 = path2.join(process.cwd(), ".cache");
+var CACHE_DIR2 = path2.join(os2.tmpdir(), "rates-cache");
 var CACHE_FILE2 = path2.join(CACHE_DIR2, "fed-cache.json");
 var CACHE_TTL_MS = 15 * 60 * 1e3;
 function readPersistentStore2() {
@@ -841,24 +839,17 @@ async function createContext(opts) {
   return { req: opts.req };
 }
 
-// server/_core/api.ts
-function createApiApp() {
-  const app2 = express();
-  app2.use(express.json());
-  app2.use(
-    ["/api/trpc", "/trpc"],
-    createExpressMiddleware({
-      router: appRouter,
-      createContext
-    })
-  );
-  return app2;
-}
-
 // api/index.ts
-var app = createApiApp();
-function handler(req, res) {
-  return app(req, res);
+async function handler(req, res) {
+  const url = req.url || "";
+  const path3 = url.replace(/^.*\/trpc\/?/, "").split("?")[0] || "";
+  return nodeHTTPRequestHandler({
+    req,
+    res,
+    router: appRouter,
+    createContext,
+    path: path3
+  });
 }
 export {
   handler as default
