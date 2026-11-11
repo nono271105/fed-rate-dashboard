@@ -1,5 +1,3 @@
-import { getEcbSnapshotHistory, getLatestEcbSnapshot, saveEcbSnapshot } from "./db";
-
 const ECB_RATES_URL = "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/key_ecb_interest_rates/html/index.en.html";
 const ECB_ESTR_URL = "https://www.ecb.europa.eu/stats/financial_markets_and_interest_rates/euro_short-term_rate/html/index.en.html";
 const ECB_CALENDAR_URL = "https://www.ecb.europa.eu/press/calendars/mgcgc/html/index.en.html";
@@ -112,16 +110,10 @@ async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
   return { asOfDate: todayIso(), updatedAt: new Date().toISOString(), source: "ecb+market", sourceLabel: "ECB officiel + OIS public", ...rates, ...estr, meetings: filtered, yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - rates.depositRate) / 0.25) * 100) / 100 : 0, yearEndDate: yearEnd?.date ?? null, dataNote: "Taux directeurs et €STR : ECB. Pricing : agrégateur public d’OIS, actualisé indépendamment et susceptible de différer d’autres fournisseurs." };
 }
 
-export async function refreshEcbDashboard(force = false) {
-  const date = todayIso();
-  if (!force) {
-    const cached = await getLatestEcbSnapshot();
-    if (cached?.snapshotDate === date) return { snapshot: JSON.parse(cached.payload) as EcbDashboardSnapshot, history: await getEcbSnapshotHistory(30) };
-  }
+export async function refreshEcbDashboard() {
   let snapshot: EcbDashboardSnapshot;
   try { snapshot = await createLiveSnapshot(); } catch (error) { console.warn("[ECB] Live provider unavailable:", error instanceof Error ? error.message : error); snapshot = fallbackSnapshot(); }
-  await saveEcbSnapshot({ snapshotDate: date, source: snapshot.source, payload: JSON.stringify(snapshot) });
-  return { snapshot, history: await getEcbSnapshotHistory(30) };
+  return { snapshot };
 }
 
 export const ecbTest = { parseMarketMeetings, fallbackSnapshot };

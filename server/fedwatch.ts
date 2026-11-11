@@ -1,5 +1,3 @@
-import { getLatestFedSnapshot, getFedSnapshotHistory, saveFedSnapshot } from "./db";
-
 const CME_SETTLEMENTS_URL =
   "https://www.cmegroup.com/CmeWS/mvc/Settlements/Futures/Settlements/305/FUT";
 const FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv";
@@ -319,16 +317,7 @@ async function createLiveSnapshot(): Promise<FedDashboardSnapshot> {
   };
 }
 
-export async function refreshFedDashboard(force = false) {
-  const currentDate = todayIso();
-  if (!force) {
-    const cached = await getLatestFedSnapshot();
-    if (cached?.snapshotDate === currentDate) {
-      const snapshot = JSON.parse(cached.payload) as FedDashboardSnapshot;
-      return { snapshot, history: await getHistory() };
-    }
-  }
-
+export async function refreshFedDashboard() {
   let snapshot: FedDashboardSnapshot;
   try {
     snapshot = await createLiveSnapshot();
@@ -336,28 +325,5 @@ export async function refreshFedDashboard(force = false) {
     console.warn("[FedWatch] Live provider unavailable, using fallback:", error instanceof Error ? error.message : error);
     snapshot = createFallbackSnapshot();
   }
-  await saveFedSnapshot({ snapshotDate: currentDate, source: snapshot.source, payload: JSON.stringify(snapshot) });
-  return { snapshot, history: await getHistory() };
-}
-
-async function getHistory() {
-  const rows = await getFedSnapshotHistory(30);
-  return rows.map((row) => {
-    const snapshot = JSON.parse(row.payload) as FedDashboardSnapshot;
-    const next = snapshot.meetings[0];
-    return {
-      date: row.snapshotDate,
-      source: row.source,
-      nextMeetingDate: next?.date ?? null,
-      hikeProbability: next?.scenarios.find((scenario) => scenario.moveBps > 0)?.probability ?? 0,
-      holdProbability: next?.scenarios.find((scenario) => scenario.moveBps === 0)?.probability ?? 0,
-      cutProbability: next?.scenarios.find((scenario) => scenario.moveBps < 0)?.probability ?? 0,
-      scenarioProbabilities: next?.scenarios.map((scenario) => ({
-        moveBps: scenario.moveBps,
-        label: scenario.label,
-        probability: scenario.probability,
-      })) ?? [],
-      yearEndMoves: snapshot.yearEndMoves,
-    };
-  }).reverse();
+  return { snapshot };
 }
