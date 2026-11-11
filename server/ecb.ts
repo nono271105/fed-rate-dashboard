@@ -93,12 +93,14 @@ function parseMarketMeetings(text: string, depositRate: number): EcbMeeting[] {
 }
 
 function fallbackSnapshot(): EcbDashboardSnapshot {
-  const meetings: EcbMeeting[] = [
+  const allMeetings: EcbMeeting[] = [
     { date: "2026-10-29", impliedRate: 2.69, moveBps: 19, moveProbability: 74.8, scenarios: [{ label: "Hausse de 25 bp", probability: 74.8, moveBps: 25, targetRate: 2.75 }, { label: "Maintien", probability: 25.2, moveBps: 0, targetRate: 2.5 }] },
     { date: "2026-12-17", impliedRate: 2.89, moveBps: 39, moveProbability: 80.4, scenarios: [{ label: "Hausse de 50 bp", probability: 52.7, moveBps: 50, targetRate: 3 }, { label: "Hausse de 25 bp", probability: 41.6, moveBps: 25, targetRate: 2.75 }, { label: "Maintien", probability: 5.7, moveBps: 0, targetRate: 2.5 }] },
     { date: "2027-02-04", impliedRate: 3.06, moveBps: 56, moveProbability: 69.6, scenarios: [{ label: "Hausse", probability: 69.6, moveBps: 50, targetRate: 3 }, { label: "Maintien / autre scénario", probability: 30.4, moveBps: 0, targetRate: 2.5 }] },
   ];
-  return { asOfDate: todayIso(), updatedAt: new Date().toISOString(), source: "fallback", sourceLabel: "ECB officiel + pricing public en cache", depositRate: 2.5, refinancingRate: 2.65, marginalRate: 2.9, estr: 2.189, estrDate: "2026-09-11", meetings, yearEndMoves: 1.55, yearEndDate: "2026-12-17", dataNote: "Les taux directeurs et €STR sont officiels ECB. Le pricing par réunion provient d’un agrégateur public OIS et reste une approximation indépendante de l’ECB." };
+  const meetings = allMeetings.filter((meeting) => meeting.date >= todayIso());
+  const yearEnd = meetings.find((meeting) => meeting.date.startsWith(todayIso().slice(0, 4)) && meeting.date.slice(5, 7) === "12") ?? meetings[meetings.length - 1];
+  return { asOfDate: todayIso(), updatedAt: new Date().toISOString(), source: "fallback", sourceLabel: "ECB officiel + pricing public en cache", depositRate: 2.5, refinancingRate: 2.65, marginalRate: 2.9, estr: 2.189, estrDate: "2026-09-11", meetings, yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - 2.5) / 0.25) * 100) / 100 : 0, yearEndDate: yearEnd?.date ?? null, dataNote: "Les taux directeurs et €STR sont officiels ECB. Le pricing par réunion provient d’un agrégateur public OIS et reste une approximation indépendante de l’ECB." };
 }
 
 async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
@@ -122,4 +124,4 @@ export async function refreshEcbDashboard(force = false) {
   return { snapshot, history: await getEcbSnapshotHistory(30) };
 }
 
-export const ecbTest = { parseMarketMeetings };
+export const ecbTest = { parseMarketMeetings, fallbackSnapshot };

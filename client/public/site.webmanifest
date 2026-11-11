@@ -1,0 +1,17 @@
+{
+  "name": "Rate Signals - Fed Watch",
+  "short_name": "Rate Signals",
+  "description": "Probabilités implicites des décisions de la Fed et de la BCE.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f4f4ef",
+  "theme_color": "#008080",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
