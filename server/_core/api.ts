@@ -8,7 +8,7 @@ export function createApiApp() {
   const app = express();
   app.use(express.json());
   app.use(
-    "/api/trpc",
+    ["/api/trpc", "/trpc"],
     createExpressMiddleware({
       router: appRouter,
       createContext,
