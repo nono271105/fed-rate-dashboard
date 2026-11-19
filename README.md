@@ -1,28 +1,56 @@
-# Rate Signals
+<h1 align="center">
+  <img src="client/public/favicon.svg" alt="logo" width="80" style="vertical-align: middle; margin-right: 8px;">
+  Rate Signals
+</h1>
 
-Tableau de bord en français des taux directeurs et des probabilités implicites des prochaines décisions de la Réserve fédérale américaine (Fed) et de la Banque centrale européenne (BCE).
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT"></a>
+  <img src="https://img.shields.io/badge/status-Active-brightgreen.svg" alt="Active">
+  <br>
+  <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="Reacts">
+  <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
+  <img src="https://img.shields.io/badge/Vercel-Deployed-000000?logo=vercel&logoColor=white" alt="Vercel">
+  <br>
+  <img src="https://img.shields.io/badge/Recharts-2.15-22B5BF?logo=chartdotjs&logoColor=white" alt="Recharts">
+</p>
 
-Les probabilités sont des estimations dérivées des prix de marché, pas des prévisions officielles des banques centrales. Le site récupère les données à la demande : il ne conserve ni historique ni cache en base de données.
+<p align="center">
+  Tableau de bord en temps réel des taux directeurs et des anticipations de politique monétaire.<br>
+  Frontend React 19 statique avec backend tRPC / Express sans état, déployable sur Vercel. Données de marché en direct (Massive, FRED & BCE SDMX).
+</p>
 
-## Utiliser le site
+---
 
-Choisir **Fed** ou **BCE** pour consulter les taux, les réunions à venir et les scénarios estimés. Le bouton **Actualiser** relance la récupération des données du marché sélectionné.
+## Fonctionnalités
 
-Si une source est indisponible, le site affiche des valeurs de secours prédéfinies. Elles sont illustratives et ne doivent pas être interprétées comme des cotations actuelles.
+### Modèles et banques centrales
+
+| Institution                                 | Marché & Sous-jacent                     | Méthode & Source                                                                     |
+| :------------------------------------------ | :---------------------------------------- | :------------------------------------------------------------------------------------ |
+| **Réserve Fédérale (Fed)**         | Futures 30-Day Fed Funds (`ZQ`) & EFFR  | Décomposition séquentielle des settlements CME, interpolation par pas de 25 bps     |
+| **Banque Centrale Européenne (BCE)** | Swaps OIS (€STR) & Calendrier du Conseil | Courbe forward OIS, probabilités dérivées de marché (RateProbability) & fallbacks |
+
+### Données de marché en temps réel
+
+- **Futures 30-Day Fed Funds (`ZQ`)** via l’API [Massive](https://massive.com/docs) : cours de règlement quotidiens du CME pour déduire le taux moyen anticipé de chaque mois contractuel.
+- **Séries officielles de la Réserve fédérale** via l’API [FRED](https://fred.stlouisfed.org/docs/api/fred/) : taux effectif des fonds fédéraux (`EFFR`) et bornes basse et haute de la fourchette cible (`DFEDTARL`, `DFEDTARU`).
+- **Taux directeurs et séries monétaires de la BCE** via l’API REST SDMX officielle du [portail de données de la BCE](https://data.ecb.europa.eu/help/api/overview) : facilité de dépôt (DFR), opérations principales de refinancement (MRO), facilité de prêt marginal (MLF) et dernier fixing €STR.
+- **Pricing des réunions BCE** s'appuyant sur le fournisseur tiers de données OIS [RateProbability](https://rateprobability.com/ecb) ou sur la structure forward des taux monétaires européens.
+- **Système de résilience et cache multi-niveaux** : cache TTL en mémoire et persistant (15 minutes) protégeant les quotas d'API (notamment Massive à 5 req/min) avec valeurs de secours déterministes pour assurer la continuité de service sans état.
+
+---
 
 ## Méthode de calcul
 
-### Fed
+### Réserve Fédérale (Fed)
 
-Sources : settlements quotidiens des contrats futures 30-Day Fed Funds récupérés via l’API [Massive](https://massive.com/docs) (produit `ZQ`) et séries officielles de la Réserve fédérale publiées par l’API [FRED](https://fred.stlouisfed.org/docs/api/fred/). Les séries FRED utilisées sont l’EFFR (`EFFR`) et les bornes basse et haute de la fourchette cible (`DFEDTARL`, `DFEDTARU`).
-
-Les taux ci-dessous sont exprimés en pourcentage (par exemple \(3{,}63\)), et \(P\) est le prix du future. Le taux moyen implicite du mois est :
+Les sources de calcul sont les settlements quotidiens des contrats futures 30-Day Fed Funds (API **Massive**, produit `ZQ`) et les séries de la Réserve fédérale (API **FRED**). Les taux sont exprimés en pourcentage (ex. $3{,}63\,\%$) et $P$ désigne le prix du future. Le taux moyen implicite du mois $r_m$ est :
 
 $$
 r_m = 100 - P
 $$
 
-Pour une réunion le jour \(j\) d’un mois de \(D\) jours, le code compte \(j-1\) jours avant la réunion et \(D-j+1\) jours à partir de celle-ci. Le taux après réunion \(r_1\) est obtenu à partir de la moyenne mensuelle :
+Pour une réunion du FOMC le jour $j$ d’un mois comptant $D$ jours, le modèle applique le taux pré-réunion $r_0$ sur $j-1$ jours et le taux post-réunion $r_1$ sur $D-j+1$ jours :
 
 $$
 r_m = \frac{(j-1)r_0 + (D-j+1)r_1}{D}
@@ -30,81 +58,184 @@ r_m = \frac{(j-1)r_0 + (D-j+1)r_1}{D}
 r_1 = \frac{D r_m - (j-1)r_0}{D-j+1}
 $$
 
-Ici, \(r_0\) est le taux en vigueur avant la réunion : lorsqu’une réunion antérieure a déjà été évaluée dans la séquence, \(r_0\) correspond au taux post-réunion de celle-ci (\(r_1\) de la décision précédente) ; pour la première décision, il provient du future du mois précédent s’il existe sans réunion intermédiaire, sinon du taux effectif EFFR. Si la réunion est dans les trois derniers jours du mois, le future du mois suivant est utilisé directement lorsqu’il est disponible.
+- $r_0$ est le taux en vigueur avant la décision : lors d’une séquence de réunions, $r_0$ correspond au taux post-réunion de la précédente ; pour la première décision, il est déduit du future du mois précédent ou de l’EFFR.
+- Si la réunion tombe dans les trois derniers jours du mois, le contrat du mois suivant est utilisé directement lorsqu'il est disponible.
 
-Un système de cache en mémoire et persistant (TTL 15 minutes) protège les quotas de l'API Massive (5 requêtes par minute) et assure la continuité de service même en cas de limitations temporaires ou de séances de négociation en cours sans prix de règlement officiel du jour.
-
-Le mouvement attendu en nombre de pas de 25 points de base est \(m=(r_1-r_0)/0{,}25\). Pour \(n=\lfloor m\rfloor\) pas, \(q\) est la probabilité du scénario à \(n+1\) pas ; le scénario à \(n\) pas reçoit le complément :
-
-$$
-n=\lfloor m\rfloor,\qquad q=m-n,\qquad
-p_n=1-q,\qquad p_{n+1}=q
-$$
-
-Les scénarios sont exprimés par rapport à la fourchette cible actuelle. Cette interpolation à deux scénarios est une approximation ; elle ne reproduit pas toute la méthode CME FedWatch.
-
-À l’horizon annuel, le nombre moyen de hausses intégrées au pricing est calculé par \(N=(r_{\mathrm{horizon}}-\mathrm{EFFR})/0{,}25\). Il s’agit d’une moyenne de marché, pas d’un nombre littéral de décisions.
-
-### BCE
-
-Les taux directeurs et le dernier €STR proviennent de l’API SDMX officielle du [portail de données de la BCE](https://data.ecb.europa.eu/help/api/overview). Le pricing des réunions s’appuie sur le fournisseur public tiers de données OIS [RateProbability](https://rateprobability.com/ecb) ou, en cas d’indisponibilité ou de challenge anti-bot, sur le calendrier officiel du Conseil des gouverneurs de la BCE combiné à la structure forward des taux monétaires européens.
-
-Pour chaque réunion, la variation implicite en points de base est calculée à partir du taux de dépôt actuel \(r_D\) et du taux OIS implicite \(r_I\), exprimés en pourcentage :
+Le mouvement attendu en nombre de pas de 25 points de base est $m = (r_1 - r_0) / 0{,}25$. Pour $n = \lfloor m\rfloor$ pas, la probabilité $q$ du scénario à $n+1$ pas et celle du scénario à $n$ pas sont :
 
 $$
-\Delta r_{\mathrm{bp}} = 100(r_I-r_D)
+n = \lfloor m\rfloor,\qquad q = m - n,\qquad p_n = 1 - q,\qquad p_{n+1} = q
 $$
 
-Le scénario affiché est arrondi au pas de 25 points de base le plus proche ; sa probabilité provient du fournisseur. Le scénario « maintien / autre » reçoit le complément à 100 % lorsqu’il est positif. À titre d’interprétation, un taux implicite peut aussi être vu comme une moyenne pondérée des taux des scénarios :
+À l’horizon annuel, le nombre moyen de variations de 25 bps intégrées au pricing de marché est calculé par :
 
 $$
-r_I=\sum_{i=1}^{n}p_i r_i,\qquad \sum_{i=1}^{n}p_i=1
+N = \frac{r_{\mathrm{horizon}} - \mathrm{EFFR}}{0{,}25}
+$$
+
+### Banque Centrale Européenne (BCE)
+
+Les taux directeurs et le fixing €STR proviennent de l’API SDMX de la BCE. Le pricing des réunions s’appuie sur les anticipations OIS (€STR).
+
+Pour chaque réunion, la variation implicite en points de base est calculée à partir du taux de facilité de dépôt actuel $r_D$ et du taux OIS implicite $r_I$ :
+
+$$
+\Delta r_{\mathrm{bp}} = 100(r_I - r_D)
+$$
+
+Le scénario dominant affiché est arrondi au pas de 25 points de base le plus proche, le taux implicite représentant l'espérance pondérée des scénarios :
+
+$$
+r_I = \sum_{i=1}^{n} p_i r_i,\qquad \sum_{i=1}^{n} p_i = 1
 $$
 
 L’équivalent en mouvements de 25 points de base à l’horizon annuel est :
 
 $$
-N_{\mathrm{BCE}}=\frac{r_{\mathrm{horizon}}-r_D}{0{,}25\%}
+N_{\mathrm{BCE}} = \frac{r_{\mathrm{horizon}} - r_D}{0{,}25\,\%}
 $$
 
-La probabilité publiée et le taux implicite dépendent du fournisseur OIS ; l’arrondi à 25 points de base est une simplification de présentation.
+---
 
-## Données et limites
+## Architecture
 
-- Les réunions affichées sont les réunions futures disponibles dans les données reçues.
-- Les données Massive, FRED, BCE et OIS peuvent être publiées à des heures différentes ou être temporairement indisponibles. L’API BCE fournit les taux officiels, pas les anticipations de marché par réunion.
-- Les valeurs de secours sont codées dans le projet pour préserver l’affichage en cas d’échec des sources ; elles ne sont pas actualisées automatiquement.
-- Les taux BCE sont accessibles sans clé. Le volet Fed nécessite `FRED_API_KEY` et `MASSIVE_API_KEY`. Les appels API récupèrent les données à la demande et ne conservent pas d’historique en base.
+L'application est architecturée pour un déploiement unifié sur **Vercel** : frontend statique React 19 servi via CDN global et API Serverless exécutée par **tRPC** et **Express**.
 
-## Développement local
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Frontend React 19                        │
+│   TypeScript 5 · Vite 7 · Tailwind CSS 4 · Radix UI · Lucide│
+│   TanStack Query v5 · Recharts · Framer Motion · Wouter     │
+│   2 vues dédiées (Fed & BCE) avec bascule instantanée       │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                               │ fetch() HTTP / tRPC client typé
+                               ▼
+                    ┌─────────────────────┐
+                    │ Proxy /api/ (Vite)  │
+                    │  ou Vercel Rewrites │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│               Backend tRPC / Express Serverless             │
+│   api/index.js (Serverless Vercel) / server/_core/index.ts  │
+│   Schémas Zod stricts · Architecture 100 % stateless        │
+│   Gestionnaire de cache TTL & fallbacks résilients          │
+└──────────────┬──────────────┬──────────────┬────────────────┘
+               │              │              │
+               ▼              ▼              ▼
+           API Massive     API FRED       API BCE (SDMX)
+           Futures ZQ     EFFR & Cible   Taux & OIS (€STR)
+```
 
-Prérequis : Node.js 20.19 ou plus récent et pnpm.
+---
+
+## Interface et Tableaux de bord
+
+### 1 · Tableau de bord Fed (Réserve fédérale)
+
+- **Indicateurs de référence** : Taux effectif EFFR, fourchette cible officielle, projection de la prochaine réunion FOMC et cumul des mouvements attendus jusqu'à l'horizon annuel.
+- **Grille des réunions** : Décomposition détaillée pour la prochaine décision et la suivante (taux pré et post-décision, contrat CME associé, probabilités de hausse, baisse ou statu quo).
+- **Distribution des probabilités** : Jauges visuelles par scénario et vue consolidée de fin d'année.
+
+### 2 · Tableau de bord BCE (Banque centrale européenne)
+
+- **Taux directeurs en vigueur** : Taux de facilité de dépôt (DFR), taux des opérations principales de refinancement (MRO) et taux de prêt marginal (MLF).
+- **Taux au jour le jour €STR** : Dernier fixing publié par la Banque centrale européenne.
+- **Anticipations du Conseil des gouverneurs** : Mouvements implicites en points de base, probabilités associées et calendrier des prochaines réunions de politique monétaire.
+
+---
+
+## Installation et Lancement
+
+### Prérequis
+
+- **Node.js 20.19+**
+- **pnpm 10+** (ou `npm`)
+- Clés d'API gratuites :
+  - **FRED API Key** (pour l'EFFR et la target range) : [Obtenir une clé FRED](https://fred.stlouisfed.org/docs/api/api_key.html)
+  - **Massive API Key** (pour les futures CME 30-Day Fed Funds) : [Obtenir une clé Massive](https://massive.com/docs)
+
+### Configuration des variables d'environnement
+
+Renseignez vos clés dans un fichier `.env` à la racine :
+
+```env
+FRED_API_KEY=votre_cle_fred_ici
+MASSIVE_API_KEY=votre_cle_massive_ici
+```
+
+> [!NOTE]
+> Les taux officiels de la BCE sont accessibles publiquement sans clé d'API. En cas d'absence des clés FRED ou Massive, le volet Fed utilise automatiquement des données de secours cohérentes.
+
+---
+
+### Lancement en développement local
 
 ```bash
+# 1. Installer les dépendances
 pnpm install
+
+# 2. Lancer le serveur de développement fullstack
 pnpm dev
 ```
 
-Le serveur indique l’adresse locale au démarrage (par défaut `http://localhost:3000`).
+L'application est accessible sur `http://localhost:3000` (ou le port indiqué dans le terminal).
 
-Commandes utiles :
+---
 
-```bash
-pnpm check  # Vérifier les types TypeScript
-pnpm test   # Exécuter les tests
-pnpm build  # Construire le site et le serveur
+## Structure du projet
+
+```
+fed-rate-dashboard/
+├── api/
+│   ├── index.js                      # Point d'entrée Serverless Vercel (export handler)
+│   └── trpc/
+│       └── [...trpc].js              # Routeur Serverless tRPC Vercel
+│
+├── client/                           # Frontend React 19
+│   ├── public/
+│   │   ├── favicon.svg               # Logo et icône de l'application
+│   │   └── site.webmanifest          # Manifest PWA
+│   ├── src/
+│   │   ├── components/               # Composants graphiques et blocs métier
+│   │   │   ├── ui/                   # Composants UI utilisés (Button, Card, Sonner, Tooltip)
+│   │   │   └── ErrorBoundary.tsx     # Gestionnaire d'erreurs d'affichage
+│   │   ├── contexts/                 # Contexte de thème et état global
+│   │   ├── lib/                      # Configuration du client tRPC et helpers
+│   │   ├── pages/
+│   │   │   ├── Home.tsx              # Page principale (Vues Fed et BCE)
+│   │   │   └── NotFound.tsx          # Page 404
+│   │   ├── App.tsx                   # Racine de l'application et routage Wouter
+│   │   ├── index.css                 # Feuilles de style Tailwind CSS 4
+│   │   └── main.tsx                  # Montage React 19
+│   └── index.html                    # HTML racine
+│
+├── server/                           # Backend Node.js / Express / tRPC
+│   ├── _core/
+│   │   ├── api.ts                    # Handler pour l'environnement Serverless
+│   │   ├── context.ts                # Contexte d'exécution tRPC
+│   │   ├── index.ts                  # Point d'entrée serveur Express local
+│   │   ├── trpc.ts                   # Initialisation et procédures tRPC
+│   │   └── vite.ts                   # Intégration Vite SSR / Dev middleware
+│   ├── ecb.ts                        # Module d'intégration BCE (SDMX) et OIS
+│   ├── ecb.test.ts                   # Tests unitaires des calculs BCE
+│   ├── fedwatch.ts                   # Module d'intégration Fed, Massive et FRED
+│   ├── fedwatch.test.ts              # Tests de pricing et décomposition Fed Funds
+│   └── routers.ts                    # Routeurs d'API tRPC (fed, ecb)
+│
+├── patches/                          # Patchs de dépendances pnpm (wouter)
+├── vercel.json                       # Configuration de déploiement Vercel
+├── vite.config.ts                    # Configuration Vite 7 et Tailwind CSS 4
+├── vitest.config.ts                  # Configuration des tests Vitest
+├── tsconfig.json                     # Configuration TypeScript
+├── package.json                      # Dépendances et scripts npm
+└── README.md
 ```
 
-## Déploiement sur Vercel
+---
 
-1. Importer le dépôt [`nono271105/fed-rate-dashboard`](https://github.com/nono271105/fed-rate-dashboard) dans Vercel.
-2. Conserver la racine du dépôt comme **Root Directory**.
-3. Garder la configuration de [`vercel.json`](./vercel.json) : installation pnpm, commande `pnpm build` et fichiers statiques dans `dist/public`. L’API est exposée par le dossier [`api/`](./api/).
-4. Dans **Settings → Environment Variables**, ajouter `FRED_API_KEY` (clé FRED valide de 32 caractères minuscules alphanumériques) et `MASSIVE_API_KEY` (clé Massive avec accès aux futures CME Fed Funds). Ajouter les mêmes variables dans un fichier local `.env` pour le développement ; ne jamais committer ce fichier ni publier les clés.
-5. Redéployer après avoir enregistré les variables. Sans l’une de ces clés, le volet Fed utilise ses valeurs de secours. Les taux officiels BCE restent accessibles sans clé, mais les probabilités BCE dépendent de la disponibilité du fournisseur OIS tiers.
+## Licence
 
-## Organisation du code
-
-- [`client/`](./client/) : interface web et ressources publiques.
-- [`server/`](./server/) : API, récupération des sources et calculs Fed/BCE.
-- [`api/`](./api/) : point d’entrée API compatible avec les fonctions serverless Vercel.
+MIT : voir [`package.json`](package.json).
