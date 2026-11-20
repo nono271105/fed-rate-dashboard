@@ -22,7 +22,7 @@ export type EcbMeeting = {
 export type EcbDashboardSnapshot = {
   asOfDate: string;
   updatedAt: string;
-  source: "ecb+market" | "ecb" | "fallback";
+  source: "ecb+market" | "ecb";
   sourceLabel: string;
   marketPricingAvailable: boolean;
   depositRate: number;
@@ -62,21 +62,14 @@ const ECB_CACHE_TTL_MS = 15 * 60 * 1000; // 15 min
 type EcbCacheStore = Record<string, { date: string; value: number; timestamp: number }>;
 
 function readPersistentStore(): EcbCacheStore {
-  const defaults: EcbCacheStore = {
-    "FM/B.U2.EUR.4F.KR.DFR.LEV": { date: "2026-09-16", value: 2.50, timestamp: 0 },
-    "FM/B.U2.EUR.4F.KR.MRR_FR.LEV": { date: "2026-09-16", value: 2.65, timestamp: 0 },
-    "FM/B.U2.EUR.4F.KR.MLFR.LEV": { date: "2026-09-16", value: 2.90, timestamp: 0 },
-    "EST/B.EU000A2X2A25.WT": { date: "2026-11-10", value: 2.442, timestamp: 0 },
-  };
   try {
     if (fs.existsSync(CACHE_FILE)) {
-      const parsed = JSON.parse(fs.readFileSync(CACHE_FILE, "utf8")) as EcbCacheStore;
-      return { ...defaults, ...parsed };
+      return JSON.parse(fs.readFileSync(CACHE_FILE, "utf8")) as EcbCacheStore;
     }
   } catch {
     // Ignore read errors
   }
-  return defaults;
+  return {};
 }
 
 function writePersistentStore(store: EcbCacheStore) {
@@ -323,64 +316,6 @@ function generateOfficialMeetingsPricing(depositRate: number): EcbMeeting[] {
   });
 }
 
-function fallbackSnapshot(): EcbDashboardSnapshot {
-  const today = todayIso();
-  const allMeetings: EcbMeeting[] = [
-    {
-      date: "2026-12-17",
-      impliedRate: 2.25,
-      moveBps: -25,
-      moveProbability: 78.5,
-      scenarios: [
-        { label: "Baisse de 25 bp", probability: 78.5, moveBps: -25, targetRate: 2.25 },
-        { label: "Maintien", probability: 21.5, moveBps: 0, targetRate: 2.5 },
-      ],
-    },
-    {
-      date: "2027-02-04",
-      impliedRate: 2.05,
-      moveBps: -45,
-      moveProbability: 82.0,
-      scenarios: [
-        { label: "Baisse de 50 bp", probability: 55.0, moveBps: -50, targetRate: 2.0 },
-        { label: "Baisse de 25 bp", probability: 38.0, moveBps: -25, targetRate: 2.25 },
-        { label: "Maintien", probability: 7.0, moveBps: 0, targetRate: 2.5 },
-      ],
-    },
-    {
-      date: "2027-03-18",
-      impliedRate: 1.95,
-      moveBps: -55,
-      moveProbability: 72.0,
-      scenarios: [
-        { label: "Baisse de 50 bp", probability: 72.0, moveBps: -50, targetRate: 2.0 },
-        { label: "Maintien / autre", probability: 28.0, moveBps: 0, targetRate: 2.5 },
-      ],
-    },
-  ];
-
-  const meetings = allMeetings.filter((meeting) => meeting.date >= today);
-  const currentYear = today.slice(0, 4);
-  const yearEnd = meetings.find((meeting) => meeting.date.startsWith(currentYear) && meeting.date.slice(5, 7) === "12") ?? meetings[meetings.length - 1];
-
-  return {
-    asOfDate: today,
-    updatedAt: new Date().toISOString(),
-    source: "fallback",
-    sourceLabel: "Données de démonstration - BCE",
-    marketPricingAvailable: true,
-    depositRate: 2.5,
-    refinancingRate: 2.65,
-    marginalRate: 2.9,
-    estr: 2.442,
-    estrDate: "2026-11-10",
-    meetings,
-    yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - 2.5) / 0.25) * 100) / 100 : 0,
-    yearEndDate: yearEnd?.date ?? null,
-    dataNote: "Valeurs indicatives calculées à partir des taux directeurs officiels de la BCE et des anticipations de marché.",
-  };
-}
-
 async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
   const [rates, estr] = await Promise.all([fetchOfficialRates(), fetchEstr()]);
   let meetings: EcbMeeting[] = [];
@@ -395,7 +330,7 @@ async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
       }
     }
   } catch {
-    // Cloudflare or external provider unavailable - fallback to official schedule with derived forward pricing
+    // Cloudflare or external provider unavailable
   }
 
   if (!meetings.length) {
@@ -426,14 +361,8 @@ async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
 }
 
 export async function refreshEcbDashboard() {
-  let snapshot: EcbDashboardSnapshot;
-  try {
-    snapshot = await createLiveSnapshot();
-  } catch (error) {
-    console.warn("[ECB] Live provider unavailable, using fallback:", error instanceof Error ? error.message : error);
-    snapshot = fallbackSnapshot();
-  }
+  const snapshot = await createLiveSnapshot();
   return { snapshot };
 }
 
-export const ecbTest = { latestSdmxObservation, parseMarketMeetings, fallbackSnapshot };
+export const ecbTest = { latestSdmxObservation, parseMarketMeetings, ECB_GOVERNING_COUNCIL_MEETINGS };

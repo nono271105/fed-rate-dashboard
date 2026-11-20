@@ -17,10 +17,10 @@ describe("ECB market parsing", () => {
     expect(meetings[0]?.scenarios[0]?.moveBps).toBe(25);
   });
 
-  it("omits expired meetings from fallback data", () => {
-    const snapshot = ecbTest.fallbackSnapshot();
-    expect(snapshot.meetings.every((meeting) => meeting.date >= snapshot.asOfDate)).toBe(true);
-    expect(snapshot.marketPricingAvailable).toBe(true);
+  it("verifies the schedule of upcoming Governing Council meetings", () => {
+    const today = "2026-01-01";
+    const upcoming = ecbTest.ECB_GOVERNING_COUNCIL_MEETINGS?.filter((date: string) => date >= today) ?? [];
+    expect(upcoming.length).toBeGreaterThanOrEqual(1);
   });
 
   it("reads the latest numeric observation from ECB SDMX CSV", () => {

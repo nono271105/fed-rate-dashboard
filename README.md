@@ -104,8 +104,8 @@ L'application est architecturée pour un déploiement unifié sur **Vercel** : f
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Frontend React 19                        │
-│   TypeScript 5 · Vite 7 · Tailwind CSS 4 · Radix UI · Lucide│
-│   TanStack Query v5 · Recharts · Framer Motion · Wouter     │
+│   TypeScript 5 - Vite 7 - Tailwind CSS 4 - Radix UI - Lucide│
+│   TanStack Query v5 - Recharts - Framer Motion - Wouter     │
 │   2 vues dédiées (Fed & BCE) avec bascule instantanée       │
 └──────────────────────────────┬──────────────────────────────┘
                                │
@@ -120,7 +120,7 @@ L'application est architecturée pour un déploiement unifié sur **Vercel** : f
 ┌─────────────────────────────────────────────────────────────┐
 │               Backend tRPC / Express Serverless             │
 │   api/index.js (Serverless Vercel) / server/_core/index.ts  │
-│   Schémas Zod stricts · Architecture 100 % stateless        │
+│   Schémas Zod stricts - Architecture 100 % stateless        │
 │   Gestionnaire de cache TTL & fallbacks résilients          │
 └──────────────┬──────────────┬──────────────┬────────────────┘
                │              │              │
@@ -133,13 +133,13 @@ L'application est architecturée pour un déploiement unifié sur **Vercel** : f
 
 ## Interface et Tableaux de bord
 
-### 1 · Tableau de bord Fed (Réserve fédérale)
+### 1 - Tableau de bord Fed (Réserve fédérale)
 
 - **Indicateurs de référence** : Taux effectif EFFR, fourchette cible officielle, projection de la prochaine réunion FOMC et cumul des mouvements attendus jusqu'à l'horizon annuel.
 - **Grille des réunions** : Décomposition détaillée pour la prochaine décision et la suivante (taux pré et post-décision, contrat CME associé, probabilités de hausse, baisse ou statu quo).
 - **Distribution des probabilités** : Jauges visuelles par scénario et vue consolidée de fin d'année.
 
-### 2 · Tableau de bord BCE (Banque centrale européenne)
+### 2 - Tableau de bord BCE (Banque centrale européenne)
 
 - **Taux directeurs en vigueur** : Taux de facilité de dépôt (DFR), taux des opérations principales de refinancement (MRO) et taux de prêt marginal (MLF).
 - **Taux au jour le jour €STR** : Dernier fixing publié par la Banque centrale européenne.

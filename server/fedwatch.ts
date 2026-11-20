@@ -32,7 +32,7 @@ export type MeetingSnapshot = {
 export type FedDashboardSnapshot = {
   asOfDate: string;
   updatedAt: string;
-  source: "massive+fred" | "fallback";
+  source: "massive+fred";
   sourceLabel: string;
   effr: number;
   targetLower: number;
@@ -430,58 +430,6 @@ export function calculateMeetings(settlements: Settlement[], meetings: string[],
   return results;
 }
 
-function fallbackMeetings(targetLower: number): MeetingSnapshot[] {
-  const today = todayIso();
-  const futureFomc = FOMC_MEETINGS.filter((d) => d >= today);
-  const selectedDates = relevantMeetings(futureFomc);
-
-  const fallbackQuotes: Record<string, { implied: number; post: number }> = {
-    "2026-12-09": { implied: 4.08, post: 4.14 },
-    "2027-01-27": { implied: 4.17, post: 4.31 },
-    "2027-03-17": { implied: 4.25, post: 4.38 },
-  };
-
-  let preRate = 3.88;
-  return selectedDates.map((date) => {
-    const quote = fallbackQuotes[date] ?? { implied: preRate + 0.15, post: preRate + 0.20 };
-    const scenarios = makeScenarios(preRate, quote.post, targetLower);
-    const dominant = [...scenarios].sort((a, b) => b.probability - a.probability)[0];
-    const snap: MeetingSnapshot = {
-      date,
-      contract: contractCode(date),
-      preRate: Math.round(preRate * 1000) / 1000,
-      postRate: Math.round(quote.post * 1000) / 1000,
-      impliedMonthlyRate: quote.implied,
-      expectedMoves: Math.round(((quote.post - preRate) / BP_STEP) * 100) / 100,
-      dominantScenario: dominant.label,
-      scenarios,
-    };
-    preRate = quote.post;
-    return snap;
-  });
-}
-
-function createFallbackSnapshot(): FedDashboardSnapshot {
-  const meetings = fallbackMeetings(3.75);
-  const today = todayIso();
-  const year = today.slice(0, 4);
-  const yearEndMeeting = meetings.find((m) => m.date.startsWith(year) && m.date.slice(5, 7) === "12") ?? meetings[meetings.length - 1];
-  const yearEndMoves = yearEndMeeting ? Math.round(((yearEndMeeting.postRate - 3.88) / BP_STEP) * 100) / 100 : 0;
-  return {
-    asOfDate: today,
-    updatedAt: new Date().toISOString(),
-    source: "fallback",
-    sourceLabel: "Mode démonstration - CME non connecté",
-    effr: 3.88,
-    targetLower: 3.75,
-    targetUpper: 4.0,
-    meetings,
-    yearEndMoves,
-    yearEndDate: yearEndMeeting?.date ?? null,
-    dataNote: "Les probabilités affichées sont un exemple calculé à partir de la méthode FedWatch. Branche une source CME officielle pour passer aux données de marché du jour.",
-  };
-}
-
 async function createLiveSnapshot(): Promise<FedDashboardSnapshot> {
   const upcomingMeetings = FOMC_MEETINGS.filter((date) => date >= todayIso());
   const meetingDates = relevantMeetings(upcomingMeetings);
@@ -518,12 +466,6 @@ async function createLiveSnapshot(): Promise<FedDashboardSnapshot> {
 export const fedTest = { latestFredValue, latestSettlement, latestPriceOrSettlement, settlementMonths, relevantMeetings };
 
 export async function refreshFedDashboard() {
-  let snapshot: FedDashboardSnapshot;
-  try {
-    snapshot = await createLiveSnapshot();
-  } catch (error) {
-    console.warn("[FedWatch] Live provider unavailable, using fallback:", error instanceof Error ? error.message : error);
-    snapshot = createFallbackSnapshot();
-  }
+  const snapshot = await createLiveSnapshot();
   return { snapshot };
 }
