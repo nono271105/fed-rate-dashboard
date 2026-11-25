@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const ECB_DATA_URL = "https://data-api.ecb.europa.eu/service/data";
+const ECB_WATCH_URL = "https://ecb-watch.eu/probabilities";
 const MARKET_PRICING_URL = "https://rateprobability.com/ecb";
 
 export type EcbMeeting = {
@@ -281,60 +282,91 @@ function parseMarketMeetings(text: string, depositRate: number): EcbMeeting[] {
   return Array.from(latestByDate.values()).filter((meeting) => meeting.date >= todayIso()).slice(0, 8);
 }
 
-function generateOfficialMeetingsPricing(depositRate: number): EcbMeeting[] {
-  const futureDates = ECB_GOVERNING_COUNCIL_MEETINGS.filter((d) => d >= todayIso());
-  
-  return futureDates.slice(0, 6).map((date, index) => {
-    const cumulativeCutBps = Math.min(75, 25 * (index + 1));
-    const impliedRate = Math.round((depositRate - (cumulativeCutBps * 0.75) / 100) * 100) / 100;
-    const moveBps = Math.round((impliedRate - depositRate) * 100);
-    const primaryMove = -25 * Math.max(1, Math.round(Math.abs(moveBps) / 25));
-    const primaryProb = Math.min(88, Math.max(55, Math.round((Math.abs(moveBps) / 25) * 65 + 10)));
-    const holdProb = Math.round((100 - primaryProb) * 10) / 10;
-    const targetRate = Math.round((depositRate + primaryMove / 100) * 100) / 100;
+type EcbWatchResponse = {
+  abs_data?: Record<string, Record<string, number>>;
+  current_rate?: number;
+  metadata?: { as_of?: string; data_sources?: string };
+};
 
-    return {
+function parseEcbWatchProbabilities(payload: EcbWatchResponse, depositRate: number): EcbMeeting[] {
+  const absData = payload?.abs_data;
+  if (!absData || typeof absData !== "object") return [];
+
+  const today = todayIso();
+  const meetings: EcbMeeting[] = [];
+
+  for (const [date, dist] of Object.entries(absData)) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < today || !dist || typeof dist !== "object") continue;
+
+    let impliedRate = 0;
+    const rawScenarios: Array<{ label: string; probability: number; moveBps: number; targetRate: number }> = [];
+
+    for (const [rateLabel, rawProb] of Object.entries(dist)) {
+      const targetRate = number(rateLabel);
+      if (targetRate === null || typeof rawProb !== "number" || !Number.isFinite(rawProb)) continue;
+      impliedRate += targetRate * rawProb;
+      const probPct = Math.round(rawProb * 1000) / 10;
+      if (probPct <= 0) continue;
+      const moveBps = Math.round((targetRate - depositRate) * 100);
+      rawScenarios.push({
+        label: moveBps > 0 ? `Hausse de ${moveBps} bp` : moveBps < 0 ? `Baisse de ${Math.abs(moveBps)} bp` : "Maintien",
+        probability: probPct,
+        moveBps,
+        targetRate,
+      });
+    }
+
+    if (!rawScenarios.length) continue;
+    rawScenarios.sort((a, b) => b.probability - a.probability);
+    const roundedImplied = Math.round(impliedRate * 1000) / 1000;
+    const moveBps = Math.round((roundedImplied - depositRate) * 100);
+    const dominant = rawScenarios[0];
+
+    meetings.push({
       date,
-      impliedRate,
+      impliedRate: roundedImplied,
       moveBps,
-      moveProbability: primaryProb,
-      scenarios: [
-        {
-          label: primaryMove < 0 ? `Baisse de ${Math.abs(primaryMove)} bp` : "Maintien",
-          probability: primaryProb,
-          moveBps: primaryMove,
-          targetRate,
-        },
-        {
-          label: "Maintien",
-          probability: holdProb,
-          moveBps: 0,
-          targetRate: depositRate,
-        },
-      ],
-    };
-  });
+      moveProbability: dominant.probability,
+      scenarios: rawScenarios,
+    });
+  }
+
+  return meetings.sort((a, b) => a.date.localeCompare(b.date)).slice(0, 8);
 }
 
 async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
   const [rates, estr] = await Promise.all([fetchOfficialRates(), fetchEstr()]);
   let meetings: EcbMeeting[] = [];
   let isExternalMarketSource = false;
+  let marketSourceDesc = "";
 
   try {
-    const market = await fetchText(MARKET_PRICING_URL);
-    if (!/Just a moment|Enable JavaScript|challenge-platform|cloudflare/i.test(market)) {
-      meetings = parseMarketMeetings(market, rates.depositRate);
+    const res = await fetch(ECB_WATCH_URL, { headers: { "User-Agent": "RateSignals/1.0", Accept: "application/json" } });
+    if (res.ok) {
+      const payload = (await res.json()) as EcbWatchResponse;
+      meetings = parseEcbWatchProbabilities(payload, rates.depositRate);
       if (meetings.length > 0) {
         isExternalMarketSource = true;
+        marketSourceDesc = "ECB Watch (€STR futures)";
       }
     }
   } catch {
-    // Cloudflare or external provider unavailable
+    // Primary market source unavailable, try secondary
   }
 
   if (!meetings.length) {
-    meetings = generateOfficialMeetingsPricing(rates.depositRate);
+    try {
+      const market = await fetchText(MARKET_PRICING_URL);
+      if (!/Just a moment|Enable JavaScript|challenge-platform|cloudflare/i.test(market)) {
+        meetings = parseMarketMeetings(market, rates.depositRate);
+        if (meetings.length > 0) {
+          isExternalMarketSource = true;
+          marketSourceDesc = "fournisseur OIS tiers";
+        }
+      }
+    } catch {
+      // Secondary provider unavailable
+    }
   }
 
   const currentYear = todayIso().slice(0, 4);
@@ -346,8 +378,8 @@ async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
     updatedAt: new Date().toISOString(),
     source: isExternalMarketSource ? "ecb+market" : "ecb",
     sourceLabel: isExternalMarketSource
-      ? "ECB SDMX officiel + pricing OIS"
-      : "ECB SDMX officiel + calendrier Conseil des gouverneurs",
+      ? `ECB SDMX officiel + ${marketSourceDesc}`
+      : "ECB SDMX officiel (pricing marché indisponible)",
     marketPricingAvailable,
     ...rates,
     ...estr,
@@ -355,8 +387,8 @@ async function createLiveSnapshot(): Promise<EcbDashboardSnapshot> {
     yearEndMoves: yearEnd ? Math.round(((yearEnd.impliedRate - rates.depositRate) / 0.25) * 100) / 100 : null,
     yearEndDate: yearEnd?.date ?? null,
     dataNote: isExternalMarketSource
-      ? "Taux directeurs et €STR : API SDMX officielle de l’ECB. Pricing par réunion : fournisseur OIS tiers."
-      : "Taux directeurs et €STR en direct via l’API SDMX officielle de l’ECB. Trajectoire et probabilités calculées selon le calendrier officiel du Conseil des gouverneurs de la BCE.",
+      ? `Taux directeurs et €STR : API SDMX officielle de l’ECB. Probabilités par réunion : ${marketSourceDesc}.`
+      : "Taux directeurs et €STR en direct via l’API SDMX officielle de l’ECB. Les probabilités de marché sont temporairement indisponibles.",
   };
 }
 
@@ -365,4 +397,4 @@ export async function refreshEcbDashboard() {
   return { snapshot };
 }
 
-export const ecbTest = { latestSdmxObservation, parseMarketMeetings, ECB_GOVERNING_COUNCIL_MEETINGS };
+export const ecbTest = { latestSdmxObservation, parseMarketMeetings, parseEcbWatchProbabilities, ECB_GOVERNING_COUNCIL_MEETINGS };

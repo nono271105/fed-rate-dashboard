@@ -10,8 +10,6 @@
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="Reacts">
   <img src="https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white" alt="TypeScript">
   <img src="https://img.shields.io/badge/Vercel-Deployed-000000?logo=vercel&logoColor=white" alt="Vercel">
-  <br>
-  <img src="https://img.shields.io/badge/Recharts-2.15-22B5BF?logo=chartdotjs&logoColor=white" alt="Recharts">
 </p>
 
 <p align="center">
@@ -28,14 +26,14 @@
 | Institution                                 | Marché & Sous-jacent                     | Méthode & Source                                                                     |
 | :------------------------------------------ | :---------------------------------------- | :------------------------------------------------------------------------------------ |
 | **Réserve Fédérale (Fed)**         | Futures 30-Day Fed Funds (`ZQ`) & EFFR  | Décomposition séquentielle des settlements CME, interpolation par pas de 25 bps     |
-| **Banque Centrale Européenne (BCE)** | Swaps OIS (€STR) & Calendrier du Conseil | Courbe forward OIS, probabilités dérivées de marché (RateProbability) & fallbacks |
+| **Banque Centrale Européenne (BCE)** | Futures €STR datés & SDMX BCE | Probabilités dérivées des futures €STR (ECB Watch) & taux officiels SDMX |
 
 ### Données de marché en temps réel
 
 - **Futures 30-Day Fed Funds (`ZQ`)** via l’API [Massive](https://massive.com/docs) : cours de règlement quotidiens du CME pour déduire le taux moyen anticipé de chaque mois contractuel.
 - **Séries officielles de la Réserve fédérale** via l’API [FRED](https://fred.stlouisfed.org/docs/api/fred/) : taux effectif des fonds fédéraux (`EFFR`) et bornes basse et haute de la fourchette cible (`DFEDTARL`, `DFEDTARU`).
 - **Taux directeurs et séries monétaires de la BCE** via l’API REST SDMX officielle du [portail de données de la BCE](https://data.ecb.europa.eu/help/api/overview) : facilité de dépôt (DFR), opérations principales de refinancement (MRO), facilité de prêt marginal (MLF) et dernier fixing €STR.
-- **Pricing des réunions BCE** s'appuyant sur le fournisseur tiers de données OIS [RateProbability](https://rateprobability.com/ecb) ou sur la structure forward des taux monétaires européens.
+- **Pricing des réunions BCE** s'appuyant sur les futures €STR datés via [ECB Watch](https://ecb-watch.eu) (et fournisseur OIS de secours).
 - **Système de résilience et cache multi-niveaux** : cache TTL en mémoire et persistant (15 minutes) protégeant les quotas d'API (notamment Massive à 5 req/min) avec valeurs de secours déterministes pour assurer la continuité de service sans état.
 
 ---
@@ -105,7 +103,7 @@ L'application est architecturée pour un déploiement unifié sur **Vercel** : f
 ┌─────────────────────────────────────────────────────────────┐
 │                    Frontend React 19                        │
 │   TypeScript 5 - Vite 7 - Tailwind CSS 4 - Radix UI - Lucide│
-│   TanStack Query v5 - Recharts - Framer Motion - Wouter     │
+│   TanStack Query v5 - KaTeX - Wouter                        │
 │   2 vues dédiées (Fed & BCE) avec bascule instantanée       │
 └──────────────────────────────┬──────────────────────────────┘
                                │
@@ -119,8 +117,8 @@ L'application est architecturée pour un déploiement unifié sur **Vercel** : f
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │               Backend tRPC / Express Serverless             │
-│   api/index.js (Serverless Vercel) / server/_core/index.ts  │
-│   Schémas Zod stricts - Architecture 100 % stateless        │
+│   api/trpc/[...trpc].ts (Vercel) / server/_core/index.ts    │
+│   Architecture 100 % stateless                              │
 │   Gestionnaire de cache TTL & fallbacks résilients          │
 └──────────────┬──────────────┬──────────────┬────────────────┘
                │              │              │
@@ -190,9 +188,8 @@ L'application est accessible sur `http://localhost:3000` (ou le port indiqué da
 ```
 fed-rate-dashboard/
 ├── api/
-│   ├── index.js                      # Point d'entrée Serverless Vercel (export handler)
 │   └── trpc/
-│       └── [...trpc].js              # Routeur Serverless tRPC Vercel
+│       └── [...trpc].ts              # Routeur Serverless tRPC Vercel
 │
 ├── client/                           # Frontend React 19
 │   ├── public/
@@ -225,7 +222,6 @@ fed-rate-dashboard/
 │   ├── fedwatch.test.ts              # Tests de pricing et décomposition Fed Funds
 │   └── routers.ts                    # Routeurs d'API tRPC (fed, ecb)
 │
-├── patches/                          # Patchs de dépendances pnpm (wouter)
 ├── vercel.json                       # Configuration de déploiement Vercel
 ├── vite.config.ts                    # Configuration Vite 7 et Tailwind CSS 4
 ├── vitest.config.ts                  # Configuration des tests Vitest

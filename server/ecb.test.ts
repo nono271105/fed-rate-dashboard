@@ -31,4 +31,21 @@ describe("ECB market parsing", () => {
     ].join("\r\n");
     expect(ecbTest.latestSdmxObservation(csv)).toEqual({ date: "2026-11-10", value: 2.442 });
   });
+
+  it("parses ECB Watch probability distributions into sorted meeting scenarios", () => {
+    const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const meetings = ecbTest.parseEcbWatchProbabilities(
+      {
+        abs_data: {
+          [futureDate]: { "2.50%": 0.04, "2.75%": 0.96, "3.00%": 0.0 },
+        },
+      },
+      2.5,
+    );
+    expect(meetings).toHaveLength(1);
+    expect(meetings[0]?.impliedRate).toBeCloseTo(2.74, 3);
+    expect(meetings[0]?.moveProbability).toBe(96);
+    expect(meetings[0]?.scenarios[0]).toMatchObject({ moveBps: 25, probability: 96, targetRate: 2.75 });
+    expect(meetings[0]?.scenarios[1]).toMatchObject({ moveBps: 0, probability: 4, targetRate: 2.5 });
+  });
 });
